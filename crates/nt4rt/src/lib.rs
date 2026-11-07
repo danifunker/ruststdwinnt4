@@ -14,11 +14,15 @@
 #![cfg_attr(not(test), no_std)]
 
 pub mod console;
+// The compiler's helpers are shared with nt4compat, the compatibility layer std links on
+// this target: the same source, compiled into whichever of the two a program uses.
+#[path = "../../nt4compat/src/half.rs"]
 pub mod half;
 pub mod heap;
 pub mod sys;
 
 #[cfg(target_arch = "arm")]
+#[path = "../../nt4compat/src/helpers.rs"]
 mod helpers;
 #[cfg(all(feature = "rt", not(test)))]
 mod start;

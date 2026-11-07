@@ -44,7 +44,8 @@ mcopy -o -i "$I" "$REBOOT" ::/TMP/RUST/REBOOT.EXE
     for exe in "$@"; do
         name=$(basename "$exe" .exe | tr a-z A-Z | cut -c1-8)
         mcopy -o -i "$I" "$exe" "::/TMP/RUST/$name.EXE"
-        printf '%s.EXE > %s.OUT 2>&1\r\necho %%ERRORLEVEL%% > %s.RC\r\n' "$name" "$name" "$name"
+        args_var=ARGS_$name
+        printf '%s.EXE %s > %s.OUT 2>&1\r\necho %%ERRORLEVEL%% > %s.RC\r\n' "$name" "${!args_var:-}" "$name" "$name"
     done
     printf 'REBOOT.EXE > REBOOT.OUT 2>&1\r\n'
 } > "$W/RUNTESTS.CMD"

@@ -1,0 +1,256 @@
+diff -ruN a/library/compiler-builtins/compiler-builtins/src/math/mod.rs b/library/compiler-builtins/compiler-builtins/src/math/mod.rs
+--- a/library/compiler-builtins/compiler-builtins/src/math/mod.rs
++++ b/library/compiler-builtins/compiler-builtins/src/math/mod.rs
+@@ -42,7 +42,8 @@
+     /* Weak linkage is unreliable on Windows and Apple, so we don't expose symbols that we know
+      * the system libc provides in order to avoid conflicts. */
+ 
+-    #[cfg(all(not(windows), not(target_vendor = "apple")))]
++    // Windows NT 4.0 (vendor nt4) has no C99 maths in its C run-time: libm gives them all.
++    #[cfg(any(all(not(windows), not(target_vendor = "apple")), target_vendor = "nt4"))]
+     libm_intrinsics! {
+         /* f32 */
+         fn cbrtf(n: f32) -> f32;
+@@ -132,7 +133,7 @@
+     all(target_family = "wasm", not(target_os = "unknown"))
+ )))]
+ pub mod partial_availability {
+-    #[cfg(not(windows))]
++    #[cfg(any(not(windows), target_vendor = "nt4"))]
+     libm_intrinsics! {
+         fn acos(x: f64) -> f64;
+         fn acosf(n: f32) -> f32;
+diff -ruN a/library/std/Cargo.toml b/library/std/Cargo.toml
+--- a/library/std/Cargo.toml
++++ b/library/std/Cargo.toml
+@@ -54,6 +54,10 @@
+     'archive',
+ ] }
+ 
++# Windows NT 4.0 (vendor nt4): the compatibility layer of ruststdwinnt4.
++[target.'cfg(target_vendor = "nt4")'.dependencies.nt4compat]
++path = "../nt4compat"
++
+ [target.'cfg(any(windows, target_os = "cygwin"))'.dependencies.windows-targets]
+ path = "../windows_targets"
+ 
+diff -ruN a/library/std/src/sys/cmath.rs b/library/std/src/sys/cmath.rs
+--- a/library/std/src/sys/cmath.rs
++++ b/library/std/src/sys/cmath.rs
+@@ -10,9 +10,9 @@
+     pub safe fn cosh(n: f64) -> f64;
+     pub safe fn expm1(n: f64) -> f64;
+     pub safe fn expm1f(n: f32) -> f32;
+-    #[cfg_attr(target_env = "msvc", link_name = "_hypot")]
++    #[cfg_attr(all(target_env = "msvc", not(target_vendor = "nt4")), link_name = "_hypot")]
+     pub safe fn hypot(x: f64, y: f64) -> f64;
+-    #[cfg_attr(target_env = "msvc", link_name = "_hypotf")]
++    #[cfg_attr(all(target_env = "msvc", not(target_vendor = "nt4")), link_name = "_hypotf")]
+     pub safe fn hypotf(x: f32, y: f32) -> f32;
+     pub safe fn log1p(n: f64) -> f64;
+     pub safe fn log1pf(n: f32) -> f32;
+diff -ruN a/library/std/src/sys/fs/windows.rs b/library/std/src/sys/fs/windows.rs
+--- a/library/std/src/sys/fs/windows.rs
++++ b/library/std/src/sys/fs/windows.rs
+@@ -1179,7 +1179,11 @@
+         // but as we don't know user's use profile of this function, lets be conservative.
+         let find_handle = c::FindFirstFileExW(
+             path.as_ptr(),
++            // Windows NT 4.0 has only the standard level (FindExInfoBasic is Windows 7).
++            #[cfg(not(target_vendor = "nt4"))]
+             c::FindExInfoBasic,
++            #[cfg(target_vendor = "nt4")]
++            0,
+             &mut wfd as *mut _ as _,
+             c::FindExSearchNameMatch,
+             ptr::null(),
+diff -ruN a/library/std/src/sys/pal/windows/c.rs b/library/std/src/sys/pal/windows/c.rs
+--- a/library/std/src/sys/pal/windows/c.rs
++++ b/library/std/src/sys/pal/windows/c.rs
+@@ -102,7 +102,7 @@
+ }
+ 
+ // Use raw-dylib to import ProcessPrng as we can't rely on there being an import library.
+-#[cfg(not(target_vendor = "win7"))]
++#[cfg(not(any(target_vendor = "win7", target_vendor = "nt4")))]
+ #[cfg_attr(
+     target_arch = "x86",
+     link(name = "bcryptprimitives", kind = "raw-dylib", import_name_type = "undecorated")
+@@ -148,7 +148,7 @@
+ 
+     // >= Win8 / Server 2012
+     // https://docs.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemtimepreciseasfiletime
+-    #[cfg(target_vendor = "win7")]
++    #[cfg(any(target_vendor = "win7", target_vendor = "nt4"))]
+     pub fn GetSystemTimePreciseAsFileTime(lpsystemtimeasfiletime: *mut FILETIME) -> () {
+         unsafe { GetSystemTimeAsFileTime(lpsystemtimeasfiletime) }
+     }
+@@ -160,7 +160,22 @@
+     }
+ }
+ 
+-#[cfg(not(target_vendor = "win7"))]
++// Windows NT 4.0 (vendor nt4): the synchronization functions come from the nt4compat crate,
++// which std depends on there, through the usual import mechanism (its __imp_ symbols).
++#[cfg(target_vendor = "nt4")]
++#[link(name = "kernel32")]
++unsafe extern "system" {
++    pub fn WaitOnAddress(
++        address: *const c_void,
++        compareaddress: *const c_void,
++        addresssize: usize,
++        dwmilliseconds: u32,
++    ) -> BOOL;
++    pub fn WakeByAddressSingle(address: *const c_void);
++    pub fn WakeByAddressAll(address: *const c_void);
++}
++
++#[cfg(not(any(target_vendor = "win7", target_vendor = "nt4")))]
+ // Use raw-dylib to import synchronization functions to workaround issues with the older mingw import library.
+ #[cfg_attr(
+     target_arch = "x86",
+diff -ruN a/library/std/src/sys/pal/windows/mod.rs b/library/std/src/sys/pal/windows/mod.rs
+--- a/library/std/src/sys/pal/windows/mod.rs
++++ b/library/std/src/sys/pal/windows/mod.rs
+@@ -9,6 +9,11 @@
+ use crate::sys::pal::windows::api::wide_str;
+ use crate::time::Duration;
+ 
++// Windows NT 4.0: the functions NT 4.0 lacks, the C run-time's entry point and TLS
++// directory, and the compiler's helpers (crates/nt4compat in ruststdwinnt4).
++#[cfg(target_vendor = "nt4")]
++extern crate nt4compat as _;
++
+ #[macro_use]
+ pub mod compat;
+ 
+diff -ruN a/library/std/src/sys/pal/windows/os.rs b/library/std/src/sys/pal/windows/os.rs
+--- a/library/std/src/sys/pal/windows/os.rs
++++ b/library/std/src/sys/pal/windows/os.rs
+@@ -192,7 +192,7 @@
+     super::fill_utf16_buf(|buf, sz| unsafe { c::GetTempPath2W(sz, buf) }, super::os2path).unwrap()
+ }
+ 
+-#[cfg(all(not(target_vendor = "uwp"), not(target_vendor = "win7")))]
++#[cfg(all(not(target_vendor = "uwp"), not(any(target_vendor = "win7", target_vendor = "nt4"))))]
+ fn home_dir_crt() -> Option<PathBuf> {
+     unsafe {
+         // Defined in processthreadsapi.h.
+@@ -218,7 +218,7 @@
+     }
+ }
+ 
+-#[cfg(target_vendor = "win7")]
++#[cfg(any(target_vendor = "win7", target_vendor = "nt4"))]
+ fn home_dir_crt() -> Option<PathBuf> {
+     unsafe {
+         use crate::sys::handle::Handle;
+diff -ruN a/library/std/src/sys/pal/windows/pipe.rs b/library/std/src/sys/pal/windows/pipe.rs
+--- a/library/std/src/sys/pal/windows/pipe.rs
++++ b/library/std/src/sys/pal/windows/pipe.rs
+@@ -50,6 +50,55 @@
+ /// mode. This means that technically speaking it should only ever be used
+ /// with `OVERLAPPED` instances, but also works out ok if it's only ever used
+ /// once at a time (which we do indeed guarantee).
++/// Windows NT 4.0 cannot make an unnamed pipe with `NtCreateNamedPipeFile`, nor open
++/// one end through the other's handle: the pipe gets a name unique in the system (the
++/// process's id and a counter) and is made the Win32 way, as std did before 1.79. Our
++/// end is overlapped (for `read2`); theirs is synchronous, inheritable if asked.
++#[cfg(target_vendor = "nt4")]
++pub fn anon_pipe(ours_readable: bool, their_handle_inheritable: bool) -> io::Result<Pipes> {
++    use crate::sync::atomic::{AtomicUsize, Ordering};
++    static NEXT: AtomicUsize = AtomicUsize::new(0);
++    const PIPE_BUFFER_CAPACITY: u32 = 64 * 1024;
++    unsafe {
++        let name: Vec<u16> = format!(
++            r"\\.\pipe\rust-anon-pipe.{}.{}",
++            c::GetCurrentProcessId(),
++            NEXT.fetch_add(1, Ordering::Relaxed)
++        )
++        .encode_utf16()
++        .chain(Some(0))
++        .collect();
++        let open_mode = if ours_readable { c::PIPE_ACCESS_INBOUND } else { c::PIPE_ACCESS_OUTBOUND }
++            | c::FILE_FLAG_OVERLAPPED;
++        let ours = c::CreateNamedPipeW(
++            name.as_ptr(),
++            open_mode,
++            c::PIPE_TYPE_BYTE | c::PIPE_READMODE_BYTE | c::PIPE_WAIT,
++            1,
++            PIPE_BUFFER_CAPACITY,
++            PIPE_BUFFER_CAPACITY,
++            0,
++            ptr::null(),
++        );
++        if ours == c::INVALID_HANDLE_VALUE {
++            return Err(io::Error::last_os_error());
++        }
++        let ours = Handle::from_raw_handle(ours);
++        let sa = c::SECURITY_ATTRIBUTES {
++            nLength: size_of::<c::SECURITY_ATTRIBUTES>() as u32,
++            lpSecurityDescriptor: ptr::null_mut(),
++            bInheritHandle: their_handle_inheritable as c::BOOL,
++        };
++        let access = if ours_readable { c::GENERIC_WRITE | c::FILE_READ_ATTRIBUTES } else { c::GENERIC_READ };
++        let theirs = c::CreateFileW(name.as_ptr(), access, 0, &sa, c::OPEN_EXISTING, 0, ptr::null_mut());
++        if theirs == c::INVALID_HANDLE_VALUE {
++            return Err(io::Error::last_os_error());
++        }
++        Ok(Pipes { ours: AnonPipe { inner: ours }, theirs: AnonPipe { inner: Handle::from_raw_handle(theirs) } })
++    }
++}
++
++#[cfg(not(target_vendor = "nt4"))]
+ pub fn anon_pipe(ours_readable: bool, their_handle_inheritable: bool) -> io::Result<Pipes> {
+     // A 64kb pipe capacity is the same as a typical Linux default.
+     const PIPE_BUFFER_CAPACITY: u32 = 64 * 1024;
+diff -ruN a/library/std/src/sys/random/windows.rs b/library/std/src/sys/random/windows.rs
+--- a/library/std/src/sys/random/windows.rs
++++ b/library/std/src/sys/random/windows.rs
+@@ -1,6 +1,6 @@
+ use crate::sys::c;
+ 
+-#[cfg(not(target_vendor = "win7"))]
++#[cfg(not(any(target_vendor = "win7", target_vendor = "nt4")))]
+ #[inline]
+ pub fn fill_bytes(bytes: &mut [u8]) {
+     let ret = unsafe { c::ProcessPrng(bytes.as_mut_ptr(), bytes.len()) };
+@@ -9,7 +9,7 @@
+     debug_assert_eq!(ret, c::TRUE);
+ }
+ 
+-#[cfg(target_vendor = "win7")]
++#[cfg(any(target_vendor = "win7", target_vendor = "nt4"))]
+ pub fn fill_bytes(mut bytes: &mut [u8]) {
+     while !bytes.is_empty() {
+         let len = bytes.len().try_into().unwrap_or(u32::MAX);
+diff -ruN a/library/std/src/sys/stdio/windows.rs b/library/std/src/sys/stdio/windows.rs
+--- a/library/std/src/sys/stdio/windows.rs
++++ b/library/std/src/sys/stdio/windows.rs
+@@ -86,12 +86,12 @@
+ }
+ 
+ /// Returns true if the attached console's code page is currently UTF-8.
+-#[cfg(not(target_vendor = "win7"))]
++#[cfg(not(any(target_vendor = "win7", target_vendor = "nt4")))]
+ fn is_utf8_console() -> bool {
+     unsafe { c::GetConsoleOutputCP() == c::CP_UTF8 }
+ }
+ 
+-#[cfg(target_vendor = "win7")]
++#[cfg(any(target_vendor = "win7", target_vendor = "nt4"))]
+ fn is_utf8_console() -> bool {
+     // Windows 7 has a fun "feature" where WriteFile on a console handle will return
+     // the number of UTF-16 code units written and not the number of bytes from the input string.
+diff -ruN a/library/windows_targets/src/lib.rs b/library/windows_targets/src/lib.rs
+--- a/library/windows_targets/src/lib.rs
++++ b/library/windows_targets/src/lib.rs
+@@ -44,7 +44,7 @@
+ 
+ #[cfg(not(feature = "windows_raw_dylib"))]
+ #[cfg(not(target_os = "cygwin"))] // Cygwin doesn't need these libs
+-#[cfg_attr(target_vendor = "win7", link(name = "advapi32"))]
++#[cfg_attr(any(target_vendor = "win7", target_vendor = "nt4"), link(name = "advapi32"))]
+ #[link(name = "ntdll")]
+ #[link(name = "userenv")]
+ #[link(name = "ws2_32")]

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# cargo for the NT 4.0 targets: makes the import libraries, then runs cargo of the pinned
-# toolchain building core and alloc for the target (-Zbuild-std), with RUSTC_BOOTSTRAP=1
-# for the -Z flags and the JSON target on a stable release.
+# cargo for the NT 4.0 targets: makes the import libraries and the patched std source
+# (tools/mkstd.sh), then runs cargo of the pinned toolchain building std for the target
+# from that source (-Zbuild-std, with __CARGO_TESTS_ONLY_SRC_ROOT, cargo's way of taking
+# the standard library's source from elsewhere), with RUSTC_BOOTSTRAP=1 for the -Z flags
+# and the JSON target on a stable release. no_std programs do not link std.
 #
 #   tools/cargo-nt4 build --release -p hello
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 "$ROOT/tools/mkimplibs.sh" arm
 cd "$ROOT"
+export __CARGO_TESTS_ONLY_SRC_ROOT="$("$ROOT/tools/mkstd.sh")"
 export RUSTC_BOOTSTRAP=1
 cmd=$1; shift
-exec cargo "$cmd" -Zbuild-std=core,alloc -Zbuild-std-features=compiler-builtins-mem "$@"
+exec cargo "$cmd" -Zbuild-std=std,panic_abort -Zbuild-std-features=compiler-builtins-mem "$@"

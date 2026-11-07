@@ -1,0 +1,18 @@
+# The compatibility layer (layer 2) of std on Windows NT 4.0: a dependency of std on the
+# nt4 targets, built with it by -Zbuild-std. tools/mkstd.sh copies this crate into the
+# patched std source as library/nt4compat, so its paths are those of that tree; it is
+# not a member of this repository's workspace.
+[package]
+name = "nt4compat"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+test = false
+bench = false
+doc = false
+
+[dependencies]
+core = { path = "../rustc-std-workspace-core", package = "rustc-std-workspace-core" }

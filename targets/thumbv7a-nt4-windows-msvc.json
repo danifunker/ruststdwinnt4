@@ -28,7 +28,7 @@
   "metadata": {
     "description": "Thumb-2 Windows NT 4.0 SP0 (PINT 4.0 on the Raspberry Pi)",
     "host_tools": false,
-    "std": false,
+    "std": true,
     "tier": 3
   },
   "no-default-libraries": false,
