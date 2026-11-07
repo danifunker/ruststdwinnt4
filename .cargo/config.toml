@@ -1,0 +1,7 @@
+# The NT 4.0 build goes through tools/cargo-nt4, which adds -Zbuild-std. Host tests:
+#   cargo test -p nt4rt --target x86_64-unknown-linux-gnu
+[build]
+target = "targets/thumbv7a-nt4-windows-msvc.json"
+
+[target.thumbv7a-nt4-windows-msvc]
+rustflags = ["-L", "native=target/implib/arm"]

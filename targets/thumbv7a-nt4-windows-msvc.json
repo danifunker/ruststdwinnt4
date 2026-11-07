@@ -1,0 +1,59 @@
+{
+  "abi-return-struct-as-int": true,
+  "arch": "arm",
+  "archive-format": "coff",
+  "binary-format": "coff",
+  "crt-objects-fallback": "false",
+  "crt-static-allows-dylibs": true,
+  "crt-static-respected": true,
+  "data-layout": "e-m:w-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64",
+  "debuginfo-kind": "pdb",
+  "dll-prefix": "",
+  "dll-suffix": ".dll",
+  "dll-tls-export": false,
+  "dynamic-linking": true,
+  "emit-debug-gdb-scripts": false,
+  "env": "msvc",
+  "exe-suffix": ".exe",
+  "features": "+vfp4,+neon",
+  "has-thread-local": false,
+  "is-like-msvc": true,
+  "is-like-windows": true,
+  "linker": "rust-lld",
+  "linker-flavor": "msvc-lld",
+  "linker-is-gnu": false,
+  "lld-flavor": "link",
+  "llvm-floatabi": "hard",
+  "llvm-target": "thumbv7a-pc-windows-msvc",
+  "max-atomic-width": 64,
+  "metadata": {
+    "description": "Thumb-2 Windows NT 4.0 SP0 (PINT 4.0 on the Raspberry Pi)",
+    "host_tools": false,
+    "std": false,
+    "tier": 3
+  },
+  "no-default-libraries": false,
+  "os": "windows",
+  "panic-strategy": "abort",
+  "pre-link-args": {
+    "msvc-lld": [
+      "/NOLOGO",
+      "/OPT:NOLBR",
+      "/NODEFAULTLIB",
+      "/OSVERSION:4.0",
+      "/SUBSYSTEM:CONSOLE,4.0"
+    ]
+  },
+  "requires-uwtable": true,
+  "split-debuginfo": "packed",
+  "staticlib-prefix": "",
+  "staticlib-suffix": ".lib",
+  "supported-split-debuginfo": [
+    "packed"
+  ],
+  "target-family": [
+    "windows"
+  ],
+  "target-pointer-width": "32",
+  "vendor": "nt4"
+}

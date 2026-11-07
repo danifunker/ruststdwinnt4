@@ -1,0 +1,7 @@
+# Rust 1.90 is the version mrustc bootstraps, so the same std patches can later serve
+# Alpha and PowerPC through mrustc. Building core/alloc/std for a custom target needs
+# -Zbuild-std; tools/cargo-nt4 sets RUSTC_BOOTSTRAP=1 to allow it on this stable release.
+[toolchain]
+channel = "1.90.0"
+components = ["rust-src"]
+profile = "minimal"

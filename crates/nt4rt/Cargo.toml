@@ -1,0 +1,12 @@
+[package]
+name = "nt4rt"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Startup, console, heap and compiler helpers for no_std programs on Windows NT 4.0 SP0"
+
+[features]
+default = ["rt"]
+# The program entry point (mainCRTStartup) and the panic handler. Leave it out in a
+# program or library that brings its own.
+rt = []
