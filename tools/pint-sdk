@@ -41,6 +41,12 @@ fetch() {
     done
     rm -rf rootfs; mkdir rootfs
     python3 -I "$ROOT/tools/unpack-image.py" manifest.json blobs rootfs
+    # The tools configure scripts need that the image lacks (it is Debian: apt works in
+    # the sandbox, as root of a tree we own).
+    "$0" sh -c 'apt-get -o APT::Sandbox::User=root -qq update &&
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root -y -qq \
+            install --no-install-recommends m4 pkgconf xz-utils file gcc libc6-dev && apt-get clean' 2>&1 \
+        | grep -v '^W: chown' || true
     echo "pint-sdk: $SDK/rootfs"
 }
 

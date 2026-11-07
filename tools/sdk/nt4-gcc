@@ -1,0 +1,74 @@
+#!/usr/bin/perl
+# A cc with GCC's arguments over PINT's SDK cl, for configure scripts and makefiles run in
+# the SDK's sandbox (tools/pint-sdk): NT 4.0 programs and objects, with NT 4.0's C
+# run-time (msvcrt.dll, -MD), ruststdwinnt4's C99 layer (crt/: its headers, nt4c99.lib
+# in every link) and Linux paths in their Wine form.
+#
+#   CC=.../tools/sdk/nt4-gcc ./configure --host=arm-w64-mingw32 ...
+use strict;
+use warnings;
+use File::Basename qw(dirname);
+use Cwd qw(abs_path);
+
+my $root = abs_path(dirname(abs_path($0)) . "/../..");
+my $crt = "$root/crt";
+my $c99lib = $ENV{NT4_C99_LIB} // "$root/target/crt/arm/nt4c99.lib";
+
+sub w { my $p = shift; return $p =~ m{^/} ? "Z:" . ($p =~ tr{/}{\\}r) : $p; }
+
+my (@out, @libpath, @libs, @inputs, @extra);
+my ($mode, $output) = ("link", undef);
+my @a = @ARGV;
+while (@a) {
+    my $x = shift @a;
+    if ($x eq "-c") { $mode = "compile"; }
+    elsif ($x eq "-E") { $mode = "preprocess"; }
+    elsif ($x eq "-o") { $output = shift @a; }
+    elsif ($x =~ /^-o(.+)/) { $output = $1; }
+    elsif ($x =~ /^-([IDU])(.*)/) { my $v = $2 eq "" ? shift @a : $2; push @out, "-$1" . ($1 eq "I" ? w($v) : $v); }
+    elsif ($x eq "-include") { push @out, "-FI" . w(shift @a); }
+    elsif ($x =~ /^-L(.*)/) { push @libpath, $1 eq "" ? shift @a : $1; }
+    elsif ($x =~ /^-l(.+)/) { push @libs, "-l$1"; }    # resolved below, with -L
+    elsif ($x =~ /^-O(s|z)$/) { push @out, "-O1"; }
+    elsif ($x =~ /^-O[1-3]?$/) { push @out, "-O2"; }
+    elsif ($x =~ /^-O0$/) { push @out, "-Od"; }
+    elsif ($x eq "-w") { push @out, "-w"; }
+    elsif ($x eq "-x") { my $l = shift @a; push @out, $l eq "c" ? "-TC" : "-TP"; }
+    elsif ($x =~ /^-(g.*|W.*|f.*|m.*|std=.*|pedantic.*|pipe|ansi|static|rdynamic|pthread|M[DPT]?|MF|Q.*)$/) {
+        shift @a if $x =~ /^-(MF|MT|MQ)$/;          # dependency options with a value
+    }
+    elsif ($x eq "-shared") { die "nt4-gcc: shared libraries are not supported\n"; }
+    elsif ($x =~ /^-/) { push @out, $x; }            # cl's own, or unknown: pass on
+    else { push @inputs, $x; }
+}
+
+# -Oi-: no intrinsic functions. With them cl rejects configure's link checks, which
+# declare `char memset();` and call it without arguments, and the check fails.
+# ruststdwinnt4's C99 headers come after the package's own -I directories, so the
+# replacement headers of gnulib (which configure scripts set up) are found first; before
+# the SDK's (INCLUDE). nt4c99.h is not forced in: gnulib's headers want config.h first,
+# and gnulib replaces what is missing itself. nt4c99.lib, in every link, gives snprintf,
+# vsnprintf, strtoll... under their own names.
+my @cl = ("cl", "-nologo", "-MD", @out, "-I" . w("$crt/include"));
+for my $i (@inputs) { push @cl, ($i =~ /\.(a|lib)$/ && ! -f $i ? $i : w($i)); }
+push @cl, "-Oi-";
+if ($mode eq "compile") {
+    push @cl, "-c";
+    push @cl, "-Fo" . w($output) if defined $output;
+} elsif ($mode eq "preprocess") {
+    push @cl, "-E";
+} else {
+    push @cl, "-Fe" . w($output) if defined $output;
+    # -lNAME: NAME.lib, or libtool's libNAME.lib or libNAME.a, in the -L directories.
+    for my $l (@libs) {
+        my $n = substr($l, 2);
+        my ($found) = grep { -f } map { my $d = $_; map { "$d/$_" } ("$n.lib", "lib$n.lib", "lib$n.a") } (@libpath, ".");
+        push @cl, defined $found ? w($found) : "$n.lib";
+    }
+    push @cl, w($c99lib) if -f $c99lib;
+    push @cl, "-link", map { "-LIBPATH:" . w($_) } @libpath if @libpath;
+}
+if ($mode eq "preprocess" && defined $output) {
+    open(STDOUT, ">", $output) or die "nt4-gcc: $output: $!\n";
+}
+exec { $cl[0] } @cl or die "nt4-gcc: cl: $!\n";

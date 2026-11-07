@@ -1,0 +1,13 @@
+#!/usr/bin/perl
+# ar over PINT's SDK lib, for makefiles run in the SDK's sandbox: `ar cru LIB OBJS...` (and
+# rcs, cr...) makes or extends LIB; t lists it. Paths in their Wine form.
+use strict;
+use warnings;
+sub w { my $p = shift; return $p =~ m{^/} ? "Z:" . ($p =~ tr{/}{\\}r) : $p; }
+my ($ops, $lib, @objs) = @ARGV;
+die "nt4-ar: usage: nt4-ar OPS LIB OBJS...\n" unless defined $lib;
+$ops =~ s/^-//;
+if ($ops =~ /t/) { exec "lib", "-nologo", "-list", w($lib); }
+my @in = map { w($_) } @objs;
+unshift @in, w($lib) if -f $lib && $ops =~ /[rq]/ && $ops !~ /c/ || (-f $lib && $ops =~ /r/);
+exec "lib", "-nologo", "-out:" . w($lib), @in;
