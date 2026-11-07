@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# The librarian of the NT 4.0 targets, for cargo's cc crate (AR): the toolchain's rust-lld
+# in its lib mode, which takes lib.exe's arguments.
+set -euo pipefail
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/rust-lld
+exec "$LLD" -flavor link /lib "$@"

@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""The C compiler of the NT 4.0 targets, for cargo's cc crate: PINT's SDK cl
+(tools/pint-sdk: Microsoft C for ARM with the NT 4.0 headers), given Linux paths.
+
+cc runs it as `cl` with Linux paths, which cl under Wine would take for options
+(/home...). Each path argument, alone or after an option (-Fo/x.o, -I/dir), becomes its
+Wine form (Z:\\x.o); the sandbox sees the host's /home, /tmp and /run/media where they are.
+
+    CC_thumbv7a_nt4_windows_msvc=tools/nt4-cl   (set by tools/cargo-nt4)
+"""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Options whose value follows them in the same argument (cl's syntax).
+PATH_OPTIONS = ("-Fo", "/Fo", "-Fe", "/Fe", "-Fd", "/Fd", "-Fa", "/Fa", "-Fp", "/Fp",
+                "-I", "/I", "-FI", "/FI", "-Tc", "/Tc", "-Tp", "/Tp")
+ROOTS = ("/home/", "/tmp/", "/run/media/")
+
+
+def wine(p):
+    return "Z:" + p.replace("/", "\\")
+
+
+def convert(a):
+    if a.startswith(ROOTS):
+        return wine(a)
+    for o in PATH_OPTIONS:
+        if a.startswith(o) and a[len(o):].startswith(ROOTS):
+            return o + wine(a[len(o):])
+    return a
+
+
+args = []
+it = iter(sys.argv[1:])
+for a in it:
+    if a.startswith("@"):  # a response file: convert its lines too
+        with open(a[1:]) as f:
+            lines = [convert(l.strip()) for l in f.read().split("\n") if l.strip()]
+        args.extend(lines)
+    else:
+        args.append(convert(a))
+os.execv(os.path.join(ROOT, "tools", "pint-sdk"), [os.path.join(ROOT, "tools", "pint-sdk"), "cl", *args])

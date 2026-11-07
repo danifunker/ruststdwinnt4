@@ -41,6 +41,8 @@ DLLS = [
     # GUI
     "user32", "gdi32", "comctl32", "comdlg32", "shell32", "ole32", "oleaut32",
     "opengl32", "imm32", "version", "winmm",
+    # the C run-time of C code (PINT ships its own msvcrt.dll)
+    "msvcrt",
 ]
 
 # The architecture blocks of kernel32.src: the #if lines that open each one.

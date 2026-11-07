@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Run a command of the PINT 4.0 SDK (PINT's tenox7/pint40sdk image: Microsoft C for ARM
+# under Wine, the NT 4.0 headers and PINT's libraries) without Docker: the image is
+# unpacked into a directory and its commands run in a bwrap sandbox, as `docker run` would
+# run them. The current directory is /src, and the host's /home, /tmp and /run/media are
+# where they are on the host, so their paths can be given as they are (Z:\\home\\...).
+#
+#   tools/pint-sdk fetch                 # download and unpack the image into $PINT_SDK
+#   ACCEPT_MSVC_LICENSE=yes tools/pint-sdk msvc-setup
+#                                        # install Microsoft C for ARM into $PINT_MSVC: this
+#                                        # accepts the Visual Studio Build Tools license
+#   tools/pint-sdk cl hello.c            # any command of the SDK, in the current directory
+#
+# PINT_SDK (the unpacked image) and PINT_MSVC (Microsoft C) default to target/pint40sdk and
+# target/msvc-arm32 of this repository; together they take about 6 GB. Docker keeps images
+# in its own storage; this keeps them where these say.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "$ROOT/nt4.env" ]; then set -a; . "$ROOT/nt4.env"; set +a; fi
+SDK=${PINT_SDK:-$ROOT/target/pint40sdk}
+MSVC_DIR=${PINT_MSVC:-$ROOT/target/msvc-arm32}
+IMAGE=tenox7/pint40sdk
+
+fetch() {
+    mkdir -p "$SDK/blobs"
+    cd "$SDK"
+    local tok accept dig
+    tok=$(curl -fsSL "https://auth.docker.io/token?service=registry.docker.io&scope=repository:$IMAGE:pull" \
+        | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')
+    accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
+    curl -fsSL -H "Authorization: Bearer $tok" -H "Accept: $accept" \
+        "https://registry-1.docker.io/v2/$IMAGE/manifests/latest" > index.json
+    dig=$(python3 -c 'import json;d=json.load(open("index.json"));print([m["digest"] for m in d["manifests"] if m["platform"]["architecture"]=="amd64"][0])')
+    curl -fsSL -H "Authorization: Bearer $tok" -H "Accept: $accept" \
+        "https://registry-1.docker.io/v2/$IMAGE/manifests/$dig" > manifest.json
+    for d in $(python3 -c 'import json;m=json.load(open("manifest.json"));print(m["config"]["digest"]);[print(l["digest"]) for l in m["layers"]]' | sort -u); do
+        local f=blobs/${d#sha256:}
+        if [ -f "$f" ] && [ "$(sha256sum "$f" | cut -c1-64)" = "${d#sha256:}" ]; then continue; fi
+        curl -fsSL -H "Authorization: Bearer $tok" -o "$f" "https://registry-1.docker.io/v2/$IMAGE/blobs/$d"
+        [ "$(sha256sum "$f" | cut -c1-64)" = "${d#sha256:}" ] || { echo "pint-sdk: checksum of $d" >&2; exit 1; }
+    done
+    rm -rf rootfs; mkdir rootfs
+    python3 -I "$ROOT/tools/unpack-image.py" manifest.json blobs rootfs
+    echo "pint-sdk: $SDK/rootfs"
+}
+
+case ${1:-} in
+    fetch) fetch; exit ;;
+    "") set -- help ;;
+esac
+[ -d "$SDK/rootfs/usr" ] || { echo "pint-sdk: no SDK in $SDK (tools/pint-sdk fetch)" >&2; exit 1; }
+mkdir -p "$MSVC_DIR"
+exec bwrap \
+    --bind "$SDK/rootfs" / \
+    --dev /dev --proc /proc --dir /run/xdg \
+    --ro-bind "$(readlink -f /etc/resolv.conf)" /etc/resolv.conf \
+    --bind "$MSVC_DIR" /opt/msvc \
+    --bind "$PWD" /src \
+    --bind-try /home /home --bind-try /run/media /run/media --bind /tmp /tmp \
+    --chdir "$( case $PWD in /home/*|/tmp/*|/run/media/*) echo "$PWD" ;; *) echo /src ;; esac )" \
+    --unshare-user --uid 0 --gid 0 --die-with-parent \
+    --clearenv \
+    --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    --setenv WINEDEBUG -all --setenv WINEPREFIX /opt/wine --setenv XDG_RUNTIME_DIR /run/xdg \
+    --setenv HOME /root \
+    --setenv ACCEPT_MSVC_LICENSE "${ACCEPT_MSVC_LICENSE:-}" \
+    /usr/local/bin/pint-entrypoint "$@"

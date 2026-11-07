@@ -130,6 +130,24 @@ it), so every std program links it. It gives:
 Edit it as files: `tools/stdpatch.sh open`, change `target/stdwork/b/library`, then
 `tools/stdpatch.sh save`.
 
+## C code
+
+C for the target is compiled by PINT's SDK (Microsoft C for ARM with the NT 4.0 headers,
+the `tenox7/pint40sdk` image), which `tools/pint-sdk` runs without Docker: the image is
+unpacked into a directory (`tools/pint-sdk fetch`) and run in a `bwrap` sandbox under
+Wine. `ACCEPT_MSVC_LICENSE=yes tools/pint-sdk msvc-setup` installs Microsoft C into it,
+which accepts the Visual Studio Build Tools license. `PINT_SDK` and `PINT_MSVC` say where
+they are (about 6 GB; `nt4.env` at the top of the repository can set them).
+
+With the SDK there, `cargo-nt4` lets the `cc` crate compile with its `cl` (`tools/nt4-cl`
+gives it Wine paths) and archive with rust-lld (`tools/nt4-lib`), and links programs with
+NT 4.0's C run-time, PINT's `msvcrt.dll`, ahead of the other import libraries (ntdll also
+exports some C functions, and C code must take them all from one run-time), and the SDK's
+`oldnames.lib`. `examples/cmix` is C in a Rust program, calling back into Rust.
+
+The C run-time's `time()` follows its own idea of the time zone: on PINT's image it is 8
+hours from Windows' UTC.
+
 ## Testing on PINT
 
     tools/cargo-nt4 build --release -p hello -p reboot
