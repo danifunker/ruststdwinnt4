@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# The linker for the NT 4.0 targets: the toolchain's rust-lld (lld-link), with every
+# /SUBSYSTEM marked for NT 4.0.
+#
+# NT 4.0 starts only images whose subsystem version is 4.0 or lower. The target's link
+# arguments give /SUBSYSTEM:CONSOLE,4.0, but for a program with
+# #![windows_subsystem = "windows"] rustc adds /SUBSYSTEM:windows after it, which lld
+# takes instead, with its default version 6.0. Here a /SUBSYSTEM without a version gets
+# ",4.0", so GUI programs need nothing of their own.
+set -euo pipefail
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/rust-lld
+[ -x "$LLD" ] || { echo "nt4-link: no rust-lld at $LLD" >&2; exit 1; }
+
+fix() {
+    case $1 in
+        [/-][Ss][Uu][Bb][Ss][Yy][Ss][Tt][Ee][Mm]:*,*) printf '%s\n' "$1" ;;
+        [/-][Ss][Uu][Bb][Ss][Yy][Ss][Tt][Ee][Mm]:*) printf '%s,4.0\n' "$1" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
+args=()
+for a in "$@"; do
+    case $a in
+        @*)  # a response file (rustc uses one for a long command line): fix it too
+            f=${a#@}
+            tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
+            sed -E 's#^("?)([/-][Ss][Uu][Bb][Ss][Yy][Ss][Tt][Ee][Mm]:[A-Za-z_]+)("?)$#\1\2,4.0\3#' "$f" > "$tmp"
+            args+=("@$tmp") ;;
+        *) args+=("$(fix "$a")") ;;
+    esac
+done
+case ${args[0]:-} in -flavor) exec "$LLD" "${args[@]}" ;; esac
+exec "$LLD" -flavor link "${args[@]}"

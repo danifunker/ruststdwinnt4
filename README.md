@@ -5,7 +5,8 @@ A Rust runtime, and later a `std` port, for Windows NT 4.0 SP0. The first target
 x86 NT 4.0 comes next. Built with Rust 1.90, the version mrustc can bootstrap, so the same
 patches can later reach Alpha and PowerPC through mrustc.
 
-Status: layers 0 and 1, for PINT only. `std` does not build for the target yet.
+Status: layers 0 and 1, for PINT only: `no_std` console and GUI programs run. `std` does
+not build for the target yet.
 
 ## Layers
 
@@ -45,15 +46,25 @@ Host tests of the runtime's pure code:
 - VFPv4, which every PINT processor has (Cortex-A7, A53, A72), for `fma`;
 - `/NODEFAULTLIB`: nothing of the MSVC run-time is linked.
 
-A GUI program (`windows_subsystem = "windows"`) is not handled yet: rustc's own
-`/SUBSYSTEM:WINDOWS` would drop the 4.0 version.
+The linker is `tools/nt4-link` (set in `.cargo/config.toml`): the toolchain's rust-lld, with
+`,4.0` added to any `/SUBSYSTEM` that has no version. For a program with
+`#![windows_subsystem = "windows"]` rustc passes `/SUBSYSTEM:windows` after the target's
+arguments, and lld would mark the image 6.0. With the wrapper, GUI programs need nothing of
+their own: `examples/gui` is one.
 
 ## Import libraries
 
 `imports/arm/*.def` list the exports of NT 4.0 SP0 for ARM, made by `tools/gen-defs.py` from
 the DLLs of an NT 4.0 CD of another architecture (there is no ARM one), adjusted as the NT 4.0
 source does for ARM: ntdll without the other architecture's names and with PINT's ARM exports
-(`__rt_udiv`, `__chkstk`...), kernel32 without its architecture block. Only names are taken.
+(`__rt_udiv`, `__chkstk`...), kernel32 without its architecture block. Each list is then
+cut to what PINT's own DLLs export (`--pint-dlls`, the DLLs of a PINT image's
+`WINNT\SYSTEM32`): PINT's advapi32 has no `Crypt*` functions and its oleaut32 about half of
+NT 4.0's. Only names are taken.
+
+The DLLs: kernel32, ntdll, advapi32, userenv, ws2_32, wsock32, and for GUI programs user32,
+gdi32, comctl32 (4.70: no functions or messages of Internet Explorer's later versions),
+comdlg32, shell32, ole32, oleaut32, opengl32, imm32, version, winmm.
 
 ## Testing on PINT
 
@@ -63,7 +74,10 @@ source does for ARM: ntdll without the other architecture's names and with PINT'
 
 `tests/pint/run-exe.sh` boots a copy of a PINT SD image in QEMU raspi2b, runs the programs
 from the All Users Startup folder, restarts NT with `examples/reboot` (`NtShutdownSystem`),
-and prints the programs' output and exit codes. About 2 minutes per run.
+and prints the programs' output and exit codes, and `NAME.LOG` for a GUI program, which has
+no console. `OUTDIR=dir` copies the files the programs left (`examples/gui` saves its window
+as `GUI.BMP`). About 2 minutes per run. PINT's restart sometimes hangs; the harness then
+warns and reads the results anyway.
 `tests/pint/qemu.sh` boots an image without a window; `tests/pint/mon.py` talks to its
 monitor (`sendkey`, `screendump`).
 

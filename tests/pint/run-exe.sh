@@ -11,9 +11,12 @@
 # firmware's banner on the serial console at that restart ends the run: QEMU is stopped
 # and the results are read off the copy.
 #
+# A GUI program has no console: it may write NAME.LOG instead, printed after NAME.OUT.
+#
 # Environment: TIMEOUT (seconds, default 300), KEEP=1 keeps the work directory,
+# OUTDIR=dir copies everything the programs left in C:\TMP\RUST there,
 # REBOOT=path of reboot.exe (default: the release build of examples/reboot).
-# Exit status: 0 when every program exited with 0.
+# Exit status: 0 when every program exited with 0 (a hung restart is only a warning).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE=$1; shift
@@ -52,10 +55,12 @@ start=$(date +%s)
 # The firmware banner: once at the first boot, again at the restart.
 until [ "$(grep -ac 'ARC Firmware' "$W/serial.log" 2>/dev/null)" -ge 2 ]; do
     if [ $(( $(date +%s) - start )) -ge "$TIMEOUT" ]; then
-        echo "run-exe: no restart within ${TIMEOUT}s" >&2
+        # PINT's restart sometimes hangs after REBOOT.EXE; the results are usually on
+        # the disk by then, so read them anyway.
+        echo "run-exe: warning: no restart within ${TIMEOUT}s; the results may be incomplete" >&2
         "$HERE/mon.py" "$W" screendump "$W/timeout.ppm" >/dev/null || true
         KEEP=1
-        exit 1
+        break
     fi
     sleep 2
 done
@@ -68,6 +73,12 @@ for exe in "$@"; do
     rc=$(mtype -i "$I" "::/TMP/RUST/$name.RC" 2>/dev/null | tr -d '\r\n ' || true)
     echo "=== $name (exit ${rc:-none})"
     mtype -i "$I" "::/TMP/RUST/$name.OUT" 2>/dev/null | tr -d '\r' || echo "(no output)"
+    mtype -i "$I" "::/TMP/RUST/$name.LOG" 2>/dev/null | tr -d '\r' || true
     [ "$rc" = 0 ] || status=1
 done
+if [ -n "${OUTDIR:-}" ]; then
+    mkdir -p "$OUTDIR"
+    mcopy -o -n -i "$I" "::/TMP/RUST/*" "$OUTDIR/"
+    echo "files: $OUTDIR"
+fi
 exit $status

@@ -14,8 +14,10 @@ architecture:
   - the other DLLs: the CD's exports as they are; they have no architecture-specific
     exports.
 
-A name in these files is therefore in NT 4.0 SP0 and in PINT 4.0. Only names are read
-from Microsoft's files; nothing else of them is copied.
+With --pint-dlls, each list is then cut to the names PINT's own DLLs export: PINT does
+not build everything of NT 4.0 (its advapi32 has no Crypt* functions, its oleaut32 about
+half of the CD's). A name in these files is therefore in NT 4.0 SP0 and in PINT 4.0.
+Only names are read from Microsoft's files; nothing else of them is copied.
 
 Usage:
   tools/gen-defs.py --cd DIR --nt4-src DIR --pint DIR [--arch arm] [--out imports/arm]
@@ -25,6 +27,7 @@ Usage:
   --cd-arch  the architecture of that CD (default alpha)
   --nt4-src  the NT 4.0 source tree (the directory holding private/ and public/)
   --pint     the PINT tree
+  --pint-dlls  a directory with the DLLs of a PINT image's WINNT/SYSTEM32 (optional)
 """
 
 import argparse
@@ -33,7 +36,12 @@ import re
 import struct
 import sys
 
-DLLS = ["kernel32", "ntdll", "advapi32", "userenv", "ws2_32", "wsock32"]
+DLLS = [
+    "kernel32", "ntdll", "advapi32", "userenv", "ws2_32", "wsock32",
+    # GUI
+    "user32", "gdi32", "comctl32", "comdlg32", "shell32", "ole32", "oleaut32",
+    "opengl32", "imm32", "version", "winmm",
+]
 
 # The architecture blocks of kernel32.src: the #if lines that open each one.
 KERNEL32_ARCH_BLOCK = {
@@ -128,6 +136,7 @@ def main():
     ap.add_argument("--cd-arch", default="alpha", choices=sorted(KERNEL32_ARCH_BLOCK))
     ap.add_argument("--nt4-src", required=True)
     ap.add_argument("--pint", required=True)
+    ap.add_argument("--pint-dlls")
     ap.add_argument("--arch", default="arm", choices=["arm"])
     ap.add_argument("--out", default="imports/arm")
     a = ap.parse_args()
@@ -147,6 +156,12 @@ def main():
         elif dll == "kernel32":
             names -= kernel32_arch_names(k32src, a.cd_arch)
             note += f" - the {a.cd_arch} block of kernel32.src"
+        if a.pint_dlls:
+            missing = names - pe_exports(find_dll(a.pint_dlls, dll))
+            names -= missing
+            if missing:
+                note += f" - {len(missing)} names PINT's {dll}.dll does not export"
+                print(f"{dll}: not in PINT: {' '.join(sorted(missing))}")
         write_def(os.path.join(a.out, f"{dll}.def"), dll, names, note)
         print(f"{dll}: {len(names)} exports")
 

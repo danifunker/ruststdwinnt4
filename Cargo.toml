@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nt4rt", "examples/hello", "examples/reboot"]
+members = ["crates/nt4rt", "examples/hello", "examples/reboot", "examples/gui"]
 
 [workspace.package]
 edition = "2021"

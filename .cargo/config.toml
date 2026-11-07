@@ -4,4 +4,6 @@
 target = "targets/thumbv7a-nt4-windows-msvc.json"
 
 [target.thumbv7a-nt4-windows-msvc]
+# tools/nt4-link: rust-lld, with every /SUBSYSTEM marked for NT 4.0 (GUI programs).
+linker = "tools/nt4-link"
 rustflags = ["-L", "native=target/implib/arm"]
