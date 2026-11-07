@@ -299,6 +299,37 @@ fn float_maths() -> R {
     ensure(ok, || "a result is off".into())
 }
 
+#[link(name = "advapi32")]
+extern "system" {
+    // RtlGenRandom (nt4compat's on NT 4.0).
+    fn SystemFunction036(buffer: *mut u8, length: u32) -> u8;
+}
+
+fn random_bytes() -> R {
+    let gen = |n: usize| {
+        let mut v = vec![0u8; n];
+        let ok = unsafe { SystemFunction036(v.as_mut_ptr(), n as u32) };
+        (ok, v)
+    };
+    let t = Instant::now();
+    let (ok, a) = gen(65536);
+    let first = t.elapsed();
+    let (_, b) = gen(65536);
+    ensure(ok == 1 && a != b, || "RtlGenRandom failed or repeated".into())?;
+    // Monobit: about half the 524288 bits are ones (5 standard deviations = 1810).
+    let ones: u32 = a.iter().map(|x| x.count_ones()).sum();
+    ensure((ones as i64 - 262_144).abs() < 1810, || format!("{ones} one bits of 524288"))?;
+    // Byte frequencies: chi-square with 255 degrees of freedom, far below 400.
+    let mut f = [0u32; 256];
+    for &x in &a {
+        f[x as usize] += 1;
+    }
+    let chi: f64 = f.iter().map(|&o| (o as f64 - 256.0).powi(2) / 256.0).sum();
+    ensure(chi < 400.0, || format!("chi-square {chi:.0}"))?;
+    println!("    (first call, gathering included: {first:?})");
+    Ok(())
+}
+
 fn main() {
     let v = std::process::Command::new("cmd").args(["/c", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     println!("std on Windows NT 4.0 ({v})");
@@ -308,6 +339,7 @@ fn main() {
     check(&mut failures, "channels, Once, park", channels_once_park);
     check(&mut failures, "thread_local + destructors", thread_locals);
     check(&mut failures, "HashMap, random keys", hashmap_and_random);
+    check(&mut failures, "RtlGenRandom quality", random_bytes);
     check(&mut failures, "files and directories", files);
     check(&mut failures, "environment, args", environment);
     check(&mut failures, "processes", processes);

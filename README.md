@@ -106,13 +106,20 @@ it), so every std program links it. It gives:
     `GetFinalPathNameByHandleW` through `NtQueryObject` and the drive letters;
     `CreateHardLinkW` through `FileLinkInformation`.
   - `getaddrinfo`/`freeaddrinfo` on `gethostbyname` (IPv4).
-  - `RtlGenRandom`: SplitMix64 seeded from clocks and ids, **not** a cryptographic source
-    (NT 4.0 has none to offer: PINT's advapi32 has no `CryptGenRandom`).
+  - `RtlGenRandom`, for std, getrandom and C code (GnuTLS): NT 4.0 has no random source
+    to offer on PINT (its advapi32 has no `CryptGenRandom`), so entropy is gathered in
+    software: timing jitter of the performance counter, the kernel's counters
+    (`NtQuerySystemInformation`), clocks, ids, memory state, `CryptGenRandom` where it
+    exists, and a seed kept in the registry between runs, through SHA-256. Output is
+    SHA-256 of the key and a counter, the key replaced after every request and reseeded
+    every 10 seconds. There is no hardware source behind it.
   - `GetProcessId`, `CompareStringOrdinal`; `AddVectoredExceptionHandler` as the
     unhandled-exception filter.
   - Failing as std expects when a feature is missing: `CreateSymbolicLinkW`,
     `CreateWaitableTimerExW`, the process attribute list functions.
     `SetThreadStackGuarantee` succeeds without doing anything.
+- The initializers of C and C++ code linked in (the `.CRT$XI*` and `.CRT$XC*` tables the C
+  run-time's startup runs), before `main`.
 - The compiler's ARM helpers (shared with nt4rt).
 
 **Layer 3, `std/1.90.0/nt4.patch`** (about 90 lines), makes vendor `nt4` take:

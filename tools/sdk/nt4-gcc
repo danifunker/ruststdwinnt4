@@ -71,4 +71,20 @@ if ($mode eq "compile") {
 if ($mode eq "preprocess" && defined $output) {
     open(STDOUT, ">", $output) or die "nt4-gcc: $output: $!\n";
 }
+# NT4_WINAPI=winsdk: the Windows API headers of the Windows SDK installed with Microsoft C
+# (um, shared), for _WIN32_WINNT 0x0400, in place of NT 4.0's; the C run-time's stay
+# NT 4.0's. Code written for today's headers that checks _WIN32_WINNT (gnulib) builds
+# then; what it calls is still checked against NT 4.0's exports when linked. PINT's cl
+# is run directly, so INCLUDE is ours (its wine-sdk launcher sets the SDK's).
+if (($ENV{NT4_WINAPI} // "") eq "winsdk") {
+    my ($kit) = sort glob("/opt/msvc/kits/Include/*");
+    my ($vc) = sort glob("/opt/msvc/VC/Tools/MSVC/*/include");
+    $ENV{INCLUDE} = join(";", map { w($_) } "$crt/include", "/opt/pint40sdk/include/crt",
+                         "$kit/um", "$kit/shared", $vc);
+    $ENV{WINEDLLOVERRIDES} = "vcruntime140=n;vcruntime140_1=n;msvcp140=n";
+    # C11 too (_Thread_local, which NT 4.0 runs for the program's own image).
+    splice @cl, 1, 0, "-std:c11", "-D_WIN32_WINNT=0x0400", "-DWINVER=0x0400";
+    $cl[0] = "/opt/pint40sdk/bin/$ENV{PINTHOST}/cl.exe";
+    unshift @cl, "wine";
+}
 exec { $cl[0] } @cl or die "nt4-gcc: cl: $!\n";

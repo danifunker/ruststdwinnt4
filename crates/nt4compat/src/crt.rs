@@ -1,5 +1,5 @@
-//! What the C run-time's startup gives an MSVC program: the entry point and the TLS
-//! directory.
+//! What the C run-time's startup gives an MSVC program: the entry point, the initializers
+//! of C and C++ code, and the TLS directory.
 
 use core::ffi::c_void;
 use core::ptr;
@@ -11,12 +11,60 @@ extern "C" {
     fn main(argc: i32, argv: *const *const u8) -> i32;
 }
 
-/// The entry point the linker gives a console or GUI program. std takes the command line
-/// from `GetCommandLineW`, so `main` gets no arguments; its result is the exit code.
+/// The entry point the linker gives a console or GUI program: it runs the initializers of
+/// C and C++ code linked in (see below), then `main`. std takes the command line from
+/// `GetCommandLineW`, so `main` gets no arguments; its result is the exit code.
 #[no_mangle]
 pub unsafe extern "C" fn mainCRTStartup() -> ! {
-    // SAFETY: main is rustc's entry; ExitProcess does not return.
-    unsafe { sys::ExitProcess(main(0, ptr::null()) as u32) }
+    // SAFETY: the tables hold the initializers the compiler put there, or nothing; main is
+    // rustc's entry; ExitProcess does not return.
+    unsafe {
+        run_initializers();
+        sys::ExitProcess(main(0, ptr::null()) as u32)
+    }
+}
+
+// The initializer tables of the Microsoft C run-time, which C and C++ code compiled with
+// Microsoft C fill: a C initializer (returning non-zero on failure) goes in a .CRT$XI?
+// section, a C++ constructor or an initializer of C code (GnuTLS's library constructor) in
+// a .CRT$XC? one. The linker sorts the sections by the letter after the $, so the tables
+// run from the entries of XIA/XCA to those of XIZ/XCZ, which are ours.
+type CInit = Option<unsafe extern "C" fn() -> i32>;
+type CppInit = Option<unsafe extern "C" fn()>;
+
+#[link_section = ".CRT$XIA"]
+#[used]
+static XI_A: CInit = None;
+#[link_section = ".CRT$XIZ"]
+#[used]
+static XI_Z: CInit = None;
+#[link_section = ".CRT$XCA"]
+#[used]
+static XC_A: CppInit = None;
+#[link_section = ".CRT$XCZ"]
+#[used]
+static XC_Z: CppInit = None;
+
+unsafe fn run_initializers() {
+    // SAFETY: the entries between the markers are function pointers or null (padding).
+    unsafe {
+        let mut p = (&raw const XI_A).wrapping_add(1);
+        while p < &raw const XI_Z {
+            if let Some(f) = ptr::read_volatile(p) {
+                if f() != 0 {
+                    sys::ExitProcess(255);
+                }
+            }
+            p = p.wrapping_add(1);
+        }
+        let mut p = (&raw const XC_A).wrapping_add(1);
+        while p < &raw const XC_Z {
+            if let Some(f) = ptr::read_volatile(p) {
+                f();
+            }
+            p = p.wrapping_add(1);
+        }
+    }
 }
 
 /// A TLS callback: `(module, reason, reserved)`.

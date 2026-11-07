@@ -27,3 +27,12 @@ int c_format(char *out, int size, double x, const char *word) {
 int c_call_back(rust_cb f, int x) { return f(x) * 2; }
 
 long c_time(void) { return (long)time(NULL); }
+
+/* A C initializer, as GnuTLS registers its library constructor with Microsoft C: the
+   program's entry point (nt4compat) must run it before main. */
+static int initialized;
+static void init_mix(void) { initialized = 42; }
+#pragma section(".CRT$XCU", read)
+__declspec(allocate(".CRT$XCU")) void (*const init_mix_entry)(void) = init_mix;
+
+int c_initialized(void) { return initialized; }

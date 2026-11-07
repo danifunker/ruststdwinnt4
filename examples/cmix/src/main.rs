@@ -7,6 +7,7 @@ extern "C" {
     fn c_format(out: *mut c_char, size: c_int, x: f64, word: *const c_char) -> c_int;
     fn c_call_back(f: extern "C" fn(c_int) -> c_int, x: c_int) -> c_int;
     fn c_time() -> c_long;
+    fn c_initialized() -> c_int;
 }
 
 extern "C" fn plus_one(x: c_int) -> c_int {
@@ -21,6 +22,8 @@ fn main() {
             failures += 1;
         }
     };
+    let i = unsafe { c_initialized() };
+    check("C initializer ran", i == 42, i.to_string());
     let mut v = [5, 3, 9, 1, 7];
     let s = unsafe { c_sort_sum(v.as_mut_ptr(), v.len() as c_int) };
     check("qsort, sum", s == 25 && v == [1, 3, 5, 7, 9], format!("{s} {v:?}"));

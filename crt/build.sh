@@ -10,7 +10,7 @@ fi
 cd "$OUT"
 "$ROOT/tools/pint-sdk" sh -c "wineserver -p
     for f in $ROOT/crt/src/*.c; do
-        NT4_C99_LIB=/nonexistent cl -nologo -MD -O2 -W3 -c -I'Z:${ROOT//\//\\}\\crt\\include' \"Z:\$(echo \$f | tr / '\\\\')\" || exit 1
+        NT4_C99_LIB=/nonexistent cl -nologo -MD -O2 -W3 -Oi- -c -I'Z:${ROOT//\//\\}\\crt\\include' \"Z:\$(echo \$f | tr / '\\\\')\" || exit 1
     done
     lib -nologo -out:nt4c99.lib *.obj && rm -f *.obj
     wineserver -k"

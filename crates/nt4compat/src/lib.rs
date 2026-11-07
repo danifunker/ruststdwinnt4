@@ -27,6 +27,7 @@ pub mod file;
 pub mod misc;
 pub mod net;
 pub mod random;
+mod sha256;
 pub mod sync;
 
 pub mod half;
