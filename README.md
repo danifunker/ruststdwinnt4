@@ -155,6 +155,22 @@ exports some C functions, and C code must take them all from one run-time), and 
 The C run-time's `time()` follows its own idea of the time zone: on PINT's image it is 8
 hours from Windows' UTC.
 
+`crt/` is a C99 layer for NT 4.0's msvcrt: headers it lacks (`stdint.h`, `inttypes.h`,
+`stdbool.h`, `unistd.h`, `dirent.h`, `limits.h` with `long long`'s limits) and
+`nt4c99.lib` (`snprintf`, a `printf` family that understands C99's length modifiers,
+`strtoll`, `opendir`, 64-bit file positions...). `nt4c99.h` is forced into the C that
+cargo builds; configure scripts (which use gnulib) get the headers and the library only.
+
+`tools/sdk/nt4-gcc`, `nt4-ar` and `nt4-ranlib` let configure scripts and makefiles run the
+SDK's `cl` and `lib` in its sandbox, with GCC's arguments; one sandbox session keeps
+Wine's server up (about 0.2 s a compile). `NT4_WINAPI=winsdk` (also for cargo builds)
+takes the Windows API headers of the Windows SDK installed with Microsoft C, for
+`_WIN32_WINNT` 0x0400 in C11 mode, instead of NT 4.0's: code written for today's headers
+that checks the version (gnulib) builds then, and the import check still rejects what NT
+4.0 lacks. vintrdp's `scripts/dist/build-deps-nt4.sh` (its `nt4` branch) builds GMP,
+Nettle, libtasn1, libiconv and GnuTLS this way. `crt/test/cryptotest.c` and
+`examples/tlstest` (a TLS 1.3 handshake between two threads) check them on PINT.
+
 ## Testing on PINT
 
     tools/cargo-nt4 build --release -p hello -p reboot

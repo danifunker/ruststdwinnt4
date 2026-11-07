@@ -73,8 +73,9 @@ type TlsCallback = unsafe extern "system" fn(*mut c_void, u32, *mut c_void);
 /// The TLS directory of the image (IMAGE_TLS_DIRECTORY), which the linker points the
 /// image's TLS entry at when it finds `_tls_used`. NT 4.0's loader then calls the callbacks
 /// listed between `.CRT$XLA` and `.CRT$XLZ` when a thread starts and ends; std puts its
-/// own in `.CRT$XLB` to run the destructors of its thread-locals. The TLS data template is
-/// empty (one byte): this target has no `#[thread_local]` variables.
+/// own in `.CRT$XLB` to run the destructors of its thread-locals. The TLS data template runs
+/// from `.tls` to `.tls$ZZZ`: the thread-locals of C code linked in (Rust's on this target
+/// are not `#[thread_local]`), which the linker puts in between.
 #[repr(C)]
 pub struct TlsDirectory {
     start_of_raw_data: *const u8,
@@ -88,14 +89,21 @@ pub struct TlsDirectory {
 // SAFETY: read-only, read by the loader.
 unsafe impl Sync for TlsDirectory {}
 
+// Writable, like the .tls sections Microsoft C emits for C code's thread-locals: the
+// linker merges sections of one name only when their flags agree, and the template must
+// be one section from TLS_START to TLS_END.
 #[link_section = ".tls"]
 #[used]
-static TLS_START: u8 = 0;
+static mut TLS_START: u8 = 0;
 
 #[link_section = ".tls$ZZZ"]
 #[used]
-static TLS_END: u8 = 0;
+static mut TLS_END: u8 = 0;
 
+/// The image's TLS index, which the loader fills in: what C code's thread-locals
+/// (`_Thread_local`, `__declspec(thread)`) are reached through, by this name.
+#[cfg_attr(not(target_arch = "x86"), export_name = "_tls_index")]
+#[cfg_attr(target_arch = "x86", export_name = "__tls_index")]
 #[used]
 static mut TLS_INDEX: u32 = 0;
 

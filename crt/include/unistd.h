@@ -23,7 +23,10 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 #endif
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
 typedef int ssize_t;
+#endif
 
 #define access   _access
 #define close    _close

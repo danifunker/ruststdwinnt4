@@ -283,3 +283,34 @@ long long llabs(long long x)
 long long strtoimax(const char *s, char **end, int base) { return strtoll(s, end, base); }
 unsigned long long strtoumax(const char *s, char **end, int base) { return strtoull(s, end, base); }
 long long imaxabs(long long x) { return llabs(x); }
+
+/* ---- 64-bit file positions -------------------------------------------------------------- */
+
+/* gnulib's ftello and fseeko use these (MinGW's names); msvcrt has no _ftelli64, but its
+   fgetpos and fsetpos take 64-bit positions (fpos_t is __int64). */
+long long ftello64(FILE *f)
+{
+    fpos_t p;
+    if (fgetpos(f, &p) != 0)
+        return -1;
+    return (long long)p;
+}
+
+int fseeko64(FILE *f, long long off, int whence)
+{
+    fpos_t p;
+    if (whence == SEEK_CUR) {
+        if (fgetpos(f, &p) != 0)
+            return -1;
+        off += (long long)p;
+    } else if (whence == SEEK_END) {
+        if (fseek(f, 0, SEEK_END) != 0 || fgetpos(f, &p) != 0)
+            return -1;
+        off += (long long)p;
+    } else if (whence != SEEK_SET) {
+        errno = EINVAL;
+        return -1;
+    }
+    p = (fpos_t)off;
+    return fsetpos(f, &p);
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The C compiler of the NT 4.0 targets, for cargo's cc crate: PINT's SDK cl
-(tools/pint-sdk: Microsoft C for ARM with the NT 4.0 headers), given Linux paths.
+(tools/pint-sdk: Microsoft C for ARM), given Linux paths, with ruststdwinnt4's C99 layer
+and the Windows API headers NT4_WINAPI asks for (tools/sdk/cl-inner).
 
 cc runs it as `cl` with Linux paths, which cl under Wine would take for options
 (/home...). Each path argument, alone or after an option (-Fo/x.o, -I/dir), becomes its
@@ -40,4 +41,5 @@ for a in it:
         args.extend(lines)
     else:
         args.append(convert(a))
-os.execv(os.path.join(ROOT, "tools", "pint-sdk"), [os.path.join(ROOT, "tools", "pint-sdk"), "cl", *args])
+sdk = os.path.join(ROOT, "tools", "pint-sdk")
+os.execv(sdk, [sdk, os.path.join(ROOT, "tools", "sdk", "cl-inner"), *args])

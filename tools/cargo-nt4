@@ -20,7 +20,7 @@
 #     with its cl (tools/nt4-cl) and archives with rust-lld (tools/nt4-lib), and programs
 #     link NT 4.0's C run-time, PINT's msvcrt.dll, ahead of everything else (ntdll also
 #     exports some C functions, and C code must take them all from one run-time), and
-#     oldnames.lib (the POSIX names).
+#     oldnames.lib (the POSIX names), and ruststdwinnt4's C99 layer (crt/, nt4c99.lib).
 # Local settings (PINT_SDK, PINT_MSVC) can go in nt4.env at the top of this repository.
 # no_std programs do not link std.
 set -euo pipefail
@@ -46,7 +46,8 @@ if [ -d "$PINT_SDK/rootfs/opt/pint40sdk/lib" ]; then
     t=$(echo "$TARGET" | tr - _)
     export "CC_$t=$ROOT/tools/nt4-cl" "AR_$t=$ROOT/tools/nt4-lib"
     # After ours, so NT 4.0's import libraries are the ones found first.
-    flags="$flags -L native=$PINT_SDK/rootfs/opt/pint40sdk/lib -Z pre-link-arg=msvcrt.lib -C link-arg=oldnames.lib"
+    "$ROOT/crt/build.sh" >/dev/null
+    flags="$flags -L native=$PINT_SDK/rootfs/opt/pint40sdk/lib -Z pre-link-arg=msvcrt.lib -C link-arg=oldnames.lib -C link-arg=$ROOT/target/crt/$ARCH/nt4c99.lib"
 fi
 export "CARGO_TARGET_${V}_RUSTFLAGS=$flags ${NT4_RUSTFLAGS:-}"
 

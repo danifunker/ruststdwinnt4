@@ -1,0 +1,14 @@
+# GnuTLS on NT 4.0: a TLS handshake between two threads of one program, over loopback.
+# Needs the C libraries built for the target (GnuTLS, Nettle, GMP, libtasn1): NT4_DEPS
+# names their prefix. Not a workspace member; build with
+#   NT4_DEPS=... tools/cargo-nt4 build --release --manifest-path examples/tlstest/Cargo.toml
+[package]
+name = "tlstest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[build-dependencies]
+cc = "1"

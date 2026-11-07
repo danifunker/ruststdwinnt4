@@ -1,13 +1,38 @@
 #!/usr/bin/perl
-# ar over PINT's SDK lib, for makefiles run in the SDK's sandbox: `ar cru LIB OBJS...` (and
-# rcs, cr...) makes or extends LIB; t lists it. Paths in their Wine form.
+# ar over PINT's SDK lib, for makefiles and libtool run in the SDK's sandbox:
+#   ar cru|rcs|cr|r LIB OBJS...   make or extend LIB
+#   ar t LIB                      list its members
+#   ar x LIB [MEMBERS...]         extract members into the current directory (libtool
+#                                 merges convenience libraries this way)
+# Paths in their Wine form.
 use strict;
 use warnings;
+use File::Basename qw(basename);
 sub w { my $p = shift; return $p =~ m{^/} ? "Z:" . ($p =~ tr{/}{\\}r) : $p; }
 my ($ops, $lib, @objs) = @ARGV;
-die "nt4-ar: usage: nt4-ar OPS LIB OBJS...\n" unless defined $lib;
+die "nt4-ar: usage: nt4-ar OPS LIB [FILES...]\n" unless defined $lib;
 $ops =~ s/^-//;
-if ($ops =~ /t/) { exec "lib", "-nologo", "-list", w($lib); }
+
+sub members {
+    open(my $fh, "-|", "lib", "-nologo", "-list", w($lib)) or die "nt4-ar: lib: $!\n";
+    my @m = grep { /\S/ && !/^Microsoft|^Copyright/ } map { s/\r?\n$//r } <$fh>;
+    close($fh) or die "nt4-ar: lib -list $lib failed\n";
+    return @m;
+}
+
+if ($ops =~ /t/) {
+    print "$_\n" for members();
+    exit 0;
+}
+if ($ops =~ /x/) {
+    my %want = map { basename($_ =~ tr{\\}{/}r) => 1 } @objs;
+    for my $m (members()) {
+        my $base = basename($m =~ tr{\\}{/}r);
+        next if %want && !$want{$base};
+        system("lib", "-nologo", "-extract:$m", "-out:$base", w($lib)) == 0 or exit 1;
+    }
+    exit 0;
+}
 my @in = map { w($_) } @objs;
 unshift @in, w($lib) if -f $lib && $ops =~ /[rq]/ && $ops !~ /c/ || (-f $lib && $ops =~ /r/);
 exec "lib", "-nologo", "-out:" . w($lib), @in;

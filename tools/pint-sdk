@@ -70,4 +70,5 @@ exec bwrap \
     --setenv WINEDEBUG -all --setenv WINEPREFIX /opt/wine --setenv XDG_RUNTIME_DIR /run/xdg \
     --setenv HOME /root \
     --setenv ACCEPT_MSVC_LICENSE "${ACCEPT_MSVC_LICENSE:-}" \
+    --setenv NT4_WINAPI "${NT4_WINAPI:-}" \
     /usr/local/bin/pint-entrypoint "$@"

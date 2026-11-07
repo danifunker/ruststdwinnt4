@@ -1,0 +1,26 @@
+#!/usr/bin/perl
+# cl as tools/nt4-cl runs it, in the SDK's sandbox: PINT's cl with ruststdwinnt4's C99
+# layer (crt/include first, nt4c99.h in every file: the code cargo's cc crate builds has
+# no gnulib) and the Windows API headers NT4_WINAPI asks for: NT 4.0's (the SDK's), or
+# with NT4_WINAPI=winsdk the Windows SDK's for _WIN32_WINNT 0x0400 in C11 mode, as
+# tools/sdk/nt4-gcc. The arguments are cl's, with Wine paths already.
+use strict;
+use warnings;
+use File::Basename qw(dirname);
+use Cwd qw(abs_path);
+my $root = abs_path(dirname(abs_path($0)) . "/../..");
+sub w { my $p = shift; return "Z:" . ($p =~ tr{/}{\\}r); }
+my $crt = "$root/crt/include";
+my @inc = ($crt, "/opt/pint40sdk/include/crt");
+my @pre = ("-I" . w($crt), "-FI" . w("$crt/nt4c99.h"));
+if (($ENV{NT4_WINAPI} // "") eq "winsdk") {
+    my ($kit) = sort glob("/opt/msvc/kits/Include/*");
+    my ($vc) = sort glob("/opt/msvc/VC/Tools/MSVC/*/include");
+    push @inc, "$kit/um", "$kit/shared", $vc;
+    push @pre, "-std:c11", "-D_WIN32_WINNT=0x0400", "-DWINVER=0x0400";
+} else {
+    @inc = ($crt, "/opt/pint40sdk/include", "/opt/pint40sdk/include/crt");
+}
+$ENV{INCLUDE} = join(";", map { w($_) } @inc);
+$ENV{WINEDLLOVERRIDES} = "vcruntime140=n;vcruntime140_1=n;msvcp140=n";
+exec "wine", "/opt/pint40sdk/bin/$ENV{PINTHOST}/cl.exe", @pre, "-Oi-", @ARGV;

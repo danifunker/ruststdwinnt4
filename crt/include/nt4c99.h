@@ -11,7 +11,7 @@
      format;
    - strtoll, strtoull, atoll, llabs and the intmax_t functions (not lldiv and imaxdiv,
      which cl builds in with types of its own);
-   - va_copy; isnan, isinf, isfinite, NAN, INFINITY. */
+   - ssize_t, va_copy; isnan, isinf, isfinite, NAN, INFINITY. */
 #ifndef NT4_C99_H
 #define NT4_C99_H
 
@@ -22,6 +22,15 @@
    macros below then rename the calls only. */
 #include <stdio.h>
 #include <float.h>
+
+#ifndef _SSIZE_T_DEFINED
+#define _SSIZE_T_DEFINED
+#ifdef _WIN64
+typedef long long ssize_t;
+#else
+typedef int ssize_t;
+#endif
+#endif
 
 #ifndef va_copy
 #define va_copy(d, s) ((d) = (s))
