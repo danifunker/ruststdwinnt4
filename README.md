@@ -35,6 +35,23 @@ with `-Zbuild-std=std,panic_abort` and `RUSTC_BOOTSTRAP=1` (a JSON target and `-
 a stable release). `tools/peinfo.py` shows the headers NT 4.0 checks
 and fails when an import is not exported by NT 4.0 SP0.
 
+Another project builds the same way, from its own directory:
+
+    cd ../some-project && ../ruststdwinnt4/tools/cargo-nt4 build --release
+
+`cargo-nt4` sets the target, linker and import libraries through cargo's environment, and
+gives the project NT 4.0 versions of the crates.io crates that need one
+(`tools/nt4-crates.py`, as `[patch.crates-io]` entries):
+
+- `windows-sys` and `windows` have no 32-bit ARM layouts (Windows dropped 32-bit ARM); they
+  get the x86 ones, which 32-bit ARM Windows shares.
+- `parking_lot_core` imports `WaitOnAddress` (from nt4compat) instead of looking for it at
+  run time and panicking without it.
+
+The `windows-targets` crate's single import library (`windows.0.52.0.lib` and so on) is all
+of NT 4.0's import libraries in one. getrandom is set to its `windows_legacy` backend
+(`RtlGenRandom`).
+
 Host tests of the runtime's pure code:
 
     cargo test -p nt4rt --target x86_64-unknown-linux-gnu

@@ -1,16 +1,44 @@
 #!/usr/bin/env bash
-# cargo for the NT 4.0 targets: makes the import libraries and the patched std source
-# (tools/mkstd.sh), then runs cargo of the pinned toolchain building std for the target
-# from that source (-Zbuild-std, with __CARGO_TESTS_ONLY_SRC_ROOT, cargo's way of taking
-# the standard library's source from elsewhere), with RUSTC_BOOTSTRAP=1 for the -Z flags
-# and the JSON target on a stable release. no_std programs do not link std.
+# cargo for the NT 4.0 targets, from any project's directory:
 #
-#   tools/cargo-nt4 build --release -p hello
+#   tools/cargo-nt4 build --release -p hello             # in this repository
+#   cd ../some-project && ../ruststdwinnt4/tools/cargo-nt4 build --release
+#
+# It makes the import libraries and the patched std source (tools/mkstd.sh), then runs
+# cargo of the pinned toolchain with:
+#   - the target (targets/<target>.json), its linker (tools/nt4-link) and the import
+#     libraries, set through cargo's environment variables so that any project gets them;
+#   - std built for the target from that source (-Zbuild-std, with
+#     __CARGO_TESTS_ONLY_SRC_ROOT, cargo's way of taking the standard library's source
+#     from elsewhere), with RUSTC_BOOTSTRAP=1 for the -Z flags and the JSON target on a
+#     stable release;
+#   - the cfgs crates use to pick their Windows backends: getrandom's `windows_legacy`
+#     (RtlGenRandom, which nt4compat gives, not Windows 10's ProcessPrng);
+#   - NT 4.0 versions of the crates.io crates that need one (tools/nt4-crates.py), as
+#     [patch.crates-io] entries for the project in the current directory.
+# no_std programs do not link std.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-"$ROOT/tools/mkimplibs.sh" arm
-cd "$ROOT"
-export __CARGO_TESTS_ONLY_SRC_ROOT="$("$ROOT/tools/mkstd.sh")"
+TARGET=${NT4_TARGET:-thumbv7a-nt4-windows-msvc}
+case $TARGET in
+    thumbv7a-*) ARCH=arm ;;
+    *) echo "cargo-nt4: unknown target $TARGET" >&2; exit 2 ;;
+esac
+"$ROOT/tools/mkimplibs.sh" "$ARCH"
+
+# The toolchain of this repository, whatever the project pins.
+export RUSTUP_TOOLCHAIN=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$ROOT/rust-toolchain.toml")
+export __CARGO_TESTS_ONLY_SRC_ROOT="$(cd "$ROOT" && tools/mkstd.sh)"
 export RUSTC_BOOTSTRAP=1
+V=$(echo "$TARGET" | tr 'a-z-' 'A-Z_')
+export CARGO_BUILD_TARGET="$ROOT/targets/$TARGET.json"
+export "CARGO_TARGET_${V}_LINKER=$ROOT/tools/nt4-link"
+export "CARGO_TARGET_${V}_RUSTFLAGS=-L native=$ROOT/target/implib/$ARCH --cfg getrandom_backend=\"windows_legacy\" ${NT4_RUSTFLAGS:-}"
+
+config=()
+if [ -f Cargo.toml ]; then
+    while IFS= read -r c; do config+=(--config "$c"); done < <(python3 "$ROOT/tools/nt4-crates.py" .)
+fi
+
 cmd=$1; shift
-exec cargo "$cmd" -Zbuild-std=std,panic_abort -Zbuild-std-features=compiler-builtins-mem "$@"
+exec cargo "$cmd" ${config[@]+"${config[@]}"} -Zbuild-std=std,panic_abort -Zbuild-std-features=compiler-builtins-mem "$@"

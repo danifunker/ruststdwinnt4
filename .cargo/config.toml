@@ -1,9 +1,5 @@
-# The NT 4.0 build goes through tools/cargo-nt4, which adds -Zbuild-std. Host tests:
+# Builds for NT 4.0 go through tools/cargo-nt4, which sets the target, its linker
+# (tools/nt4-link) and the import libraries, and builds std (-Zbuild-std). Host tests:
 #   cargo test -p nt4rt --target x86_64-unknown-linux-gnu
 [build]
 target = "targets/thumbv7a-nt4-windows-msvc.json"
-
-[target.thumbv7a-nt4-windows-msvc]
-# tools/nt4-link: rust-lld, with every /SUBSYSTEM marked for NT 4.0 (GUI programs).
-linker = "tools/nt4-link"
-rustflags = ["-L", "native=target/implib/arm"]
