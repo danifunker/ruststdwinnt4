@@ -151,7 +151,7 @@ def main():
 
     if a.defs:
         for dll, names in by_dll.items():
-            path = os.path.join(a.defs, dll.lower().removesuffix(".dll") + ".def")
+            path = os.path.join(a.defs, os.path.splitext(dll.lower())[0] + ".def")
             if not os.path.exists(path):
                 print(f"ERROR: {dll} is not a DLL of NT 4.0 SP0 ({path} missing)")
                 ok = False
