@@ -11,9 +11,33 @@ diff -ruN a/library/compiler-builtins/compiler-builtins/src/math/mod.rs b/librar
      libm_intrinsics! {
          /* f32 */
          fn cbrtf(n: f32) -> f32;
-@@ -132,7 +133,7 @@
-     all(target_family = "wasm", not(target_os = "unknown"))
- )))]
+@@ -122,17 +123,22 @@
+ ///     - <https://github.com/rust-lang/rust/issues/128533>
+ /// - All unix targets (linux, macos, freebsd, android, etc)
+ /// - wasm with known target_os
+-#[cfg(not(any(
+-    all(
+-        target_arch = "x86",
+-        not(target_feature = "sse2"),
+-        not(target_os = "uefi"),
+-    ),
+-    unix,
+-    all(target_family = "wasm", not(target_os = "unknown"))
+-)))]
++// Windows NT 4.0 (vendor nt4) on x86 has no SSE2 and no C99 maths: libm's it is, with
++// the x87 caveat above (a signalling NaN comes back quiet).
++#[cfg(any(
++    not(any(
++        all(
++            target_arch = "x86",
++            not(target_feature = "sse2"),
++            not(target_os = "uefi"),
++        ),
++        unix,
++        all(target_family = "wasm", not(target_os = "unknown"))
++    )),
++    target_vendor = "nt4"
++))]
  pub mod partial_availability {
 -    #[cfg(not(windows))]
 +    #[cfg(any(not(windows), target_vendor = "nt4"))]

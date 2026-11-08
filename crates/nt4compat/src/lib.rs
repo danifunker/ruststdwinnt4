@@ -33,3 +33,7 @@ pub mod sync;
 pub mod half;
 #[cfg(target_arch = "arm")]
 mod helpers;
+#[cfg(target_arch = "x86")]
+mod helpers_x86;
+#[cfg(target_arch = "x86")]
+mod x86;

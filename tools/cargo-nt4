@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET=${NT4_TARGET:-thumbv7a-nt4-windows-msvc}
 case $TARGET in
     thumbv7a-*) ARCH=arm ;;
+    i686-*) ARCH=x86 ;;
     *) echo "cargo-nt4: unknown target $TARGET" >&2; exit 2 ;;
 esac
 "$ROOT/tools/mkimplibs.sh" "$ARCH"
@@ -42,7 +43,7 @@ V=$(echo "$TARGET" | tr 'a-z-' 'A-Z_')
 export CARGO_BUILD_TARGET="$ROOT/targets/$TARGET.json"
 export "CARGO_TARGET_${V}_LINKER=$ROOT/tools/nt4-link"
 flags="-L native=$ROOT/target/implib/$ARCH --cfg getrandom_backend=\"windows_legacy\""
-if [ -d "$PINT_SDK/rootfs/opt/pint40sdk/lib" ]; then
+if [ "$ARCH" = arm ] && [ -d "$PINT_SDK/rootfs/opt/pint40sdk/lib" ]; then
     t=$(echo "$TARGET" | tr - _)
     export "CC_$t=$ROOT/tools/nt4-cl" "AR_$t=$ROOT/tools/nt4-lib"
     # After ours, so NT 4.0's import libraries are the ones found first.

@@ -10,8 +10,10 @@ macro_rules! provide {
     ($($name:ident = $f:path, $bytes:literal;)*) => {
         $(
             const _: () = {
+                // LLVM puts the C prefix '_' before the name on x86, making it
+                // __imp__<name>@<bytes>.
                 #[cfg_attr(not(target_arch = "x86"), export_name = concat!("__imp_", stringify!($name)))]
-                #[cfg_attr(target_arch = "x86", export_name = concat!("__imp__", stringify!($name), "@", stringify!($bytes)))]
+                #[cfg_attr(target_arch = "x86", export_name = concat!("_imp__", stringify!($name), "@", stringify!($bytes)))]
                 #[used]
                 static IMP: unsafe extern "system" fn() = unsafe {
                     core::mem::transmute::<*const (), unsafe extern "system" fn()>($f as *const ())

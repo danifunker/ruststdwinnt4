@@ -102,8 +102,8 @@ static mut TLS_END: u8 = 0;
 
 /// The image's TLS index, which the loader fills in: what C code's thread-locals
 /// (`_Thread_local`, `__declspec(thread)`) are reached through, by this name.
-#[cfg_attr(not(target_arch = "x86"), export_name = "_tls_index")]
-#[cfg_attr(target_arch = "x86", export_name = "__tls_index")]
+// On x86, LLVM's C prefix makes it __tls_index, as the linker expects.
+#[export_name = "_tls_index"]
 #[used]
 static mut TLS_INDEX: u32 = 0;
 
@@ -115,8 +115,7 @@ static XL_A: Option<TlsCallback> = None;
 #[used]
 static XL_Z: Option<TlsCallback> = None;
 
-#[cfg_attr(not(target_arch = "x86"), export_name = "_tls_used")]
-#[cfg_attr(target_arch = "x86", export_name = "__tls_used")]
+#[export_name = "_tls_used"]
 #[used]
 pub static TLS_USED: TlsDirectory = TlsDirectory {
     start_of_raw_data: &raw const TLS_START,

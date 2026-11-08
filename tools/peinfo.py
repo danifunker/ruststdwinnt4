@@ -108,7 +108,12 @@ def def_names(path):
         for line in f:
             m = re.match(r"^\s+(\S+)", line)
             if m and not line.lstrip().startswith(";"):
-                names.add(m.group(1))
+                # x86 lists write __stdcall names with their argument bytes
+                # (CreateFileW@28); the image imports them plain.
+                name = m.group(1)
+                if not name.startswith("?"):
+                    name = re.sub(r"@\d+$", "", name)
+                names.add(name)
     return names
 
 

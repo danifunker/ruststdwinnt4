@@ -1,0 +1,4 @@
+; dbghelp.dll is not part of Windows NT 4.0. std names it only for backtraces, which load
+; it at run time if it is there; this empty import library satisfies the link.
+LIBRARY dbghelp.dll
+EXPORTS

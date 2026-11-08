@@ -3,11 +3,15 @@
 # the pinned toolchain (its llvm-lib mode), so no Microsoft tool is needed.
 #
 #   tools/mkimplibs.sh [ARCH]      # default arm: imports/arm/*.def -> target/implib/arm/*.lib
+#
+# x86 import libraries are written by tools/implib.py instead: their names are decorated
+# (_CreateFileW@28) and must be imported plain, which rust-lld's /def cannot express.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ARCH=${1:-arm}
 case $ARCH in
     arm) MACHINE=arm ;;
+    x86) MACHINE=x86 ;;
     *) echo "mkimplibs: unknown architecture $ARCH" >&2; exit 1 ;;
 esac
 LLD=$(find "$(rustc --print sysroot)" -name rust-lld -type f | head -1)
@@ -18,7 +22,11 @@ changed=
 for def in imports/$ARCH/*.def; do
     lib=$OUT/$(basename "${def%.def}").lib
     if [ ! -f "$lib" ] || [ "$def" -nt "$lib" ]; then
-        "$LLD" -flavor link /lib /nologo /machine:$MACHINE /def:"$def" /out:"$lib"
+        if [ "$ARCH" = x86 ]; then
+            python3 tools/implib.py --def "$def" --out "$lib"
+        else
+            "$LLD" -flavor link /lib /nologo /machine:$MACHINE /def:"$def" /out:"$lib"
+        fi
         changed=1
     fi
 done

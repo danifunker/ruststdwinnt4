@@ -1,0 +1,58 @@
+{
+  "abi-return-struct-as-int": true,
+  "arch": "x86",
+  "archive-format": "coff",
+  "binary-format": "coff",
+  "cpu": "pentium",
+  "crt-objects-fallback": "false",
+  "crt-static-allows-dylibs": true,
+  "crt-static-respected": true,
+  "data-layout": "e-m:x-p:32:32-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32-a:0:32-S32",
+  "debuginfo-kind": "pdb",
+  "dll-prefix": "",
+  "dll-suffix": ".dll",
+  "dll-tls-export": false,
+  "dynamic-linking": true,
+  "emit-debug-gdb-scripts": false,
+  "env": "msvc",
+  "exe-suffix": ".exe",
+  "features": "-mmx,-sse,-sse2",
+  "has-thread-local": false,
+  "is-like-msvc": true,
+  "is-like-windows": true,
+  "linker-flavor": "msvc-lld",
+  "linker-is-gnu": false,
+  "lld-flavor": "link",
+  "llvm-target": "i686-pc-windows-msvc",
+  "max-atomic-width": 64,
+  "metadata": {
+    "description": "x86 Windows NT 4.0 SP0",
+    "host_tools": false,
+    "std": true,
+    "tier": 3
+  },
+  "no-default-libraries": false,
+  "os": "windows",
+  "panic-strategy": "abort",
+  "pre-link-args": {
+    "msvc-lld": [
+      "/NOLOGO",
+      "/NODEFAULTLIB",
+      "/LARGEADDRESSAWARE",
+      "/OSVERSION:4.0",
+      "/SUBSYSTEM:CONSOLE,4.0"
+    ]
+  },
+  "requires-uwtable": true,
+  "split-debuginfo": "packed",
+  "staticlib-prefix": "",
+  "staticlib-suffix": ".lib",
+  "supported-split-debuginfo": [
+    "packed"
+  ],
+  "target-family": [
+    "windows"
+  ],
+  "target-pointer-width": "32",
+  "vendor": "nt4"
+}

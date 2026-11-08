@@ -2,10 +2,10 @@
 
 A Rust runtime, and later a `std` port, for Windows NT 4.0 SP0. The first target is
 [PINT](https://github.com/tenox7/PINT), NT 4.0 on 32-bit ARM (the Raspberry Pi 2, 3 and 4);
-x86 NT 4.0 comes next. Built with Rust 1.90, the version mrustc can bootstrap, so the same
+x86 NT 4.0 (`i686-nt4-windows-msvc`) is the second. Built with Rust 1.90, the version mrustc can bootstrap, so the same
 patches can later reach Alpha and PowerPC through mrustc.
 
-Status: layers 0 to 3, for PINT only. `std` programs run on PINT: threads and locks,
+Status: layers 0 to 3, for PINT and x86. `std` programs run on PINT: threads and locks,
 thread-locals, files and directories, processes with pipes, TCP and name resolution, time,
 float maths (`examples/stdtest`). `no_std` console and GUI programs run as well. Panics
 abort (no unwinding yet).
@@ -55,6 +55,41 @@ of NT 4.0's import libraries in one. getrandom is set to its `windows_legacy` ba
 Host tests of the runtime's pure code:
 
     cargo test -p nt4rt --target x86_64-unknown-linux-gnu
+
+## The x86 target
+
+`targets/i686-nt4-windows-msvc.json` is Rust's `i686-pc-windows-msvc` with vendor `nt4`,
+no implicit TLS, the image marked for NT 4.0, and a Pentium without MMX or SSE: NT 4.0
+runs on an i486 and up and never enables SSE (it doesn't save the SSE registers when it
+switches threads), so floating point is on the x87. Build with
+`NT4_TARGET=i686-nt4-windows-msvc tools/cargo-nt4 ...` and check with
+`tools/peinfo.py IMAGE --defs imports/x86`.
+
+What is different from ARM:
+
+- **Names are decorated.** x86 programs link against `_CreateFileW@28` and the DLL exports
+  `CreateFileW`. `imports/x86/*.def` give each __stdcall export its argument bytes
+  (`CreateFileW@28`), and `tools/implib.py` writes the import libraries with the name type
+  that strips them (rust-lld's `/def` cannot express it). `tools/gen-defs.py --arch x86`
+  makes the lists from an x86 system's DLLs, taking the bytes from the `windows_i686_msvc`
+  crate's import library and `EXTRA_DECORATIONS` for undocumented NTDLL functions.
+  The lists here come from an NT 4.0 SP1 install: its DLLs export exactly the names of the
+  SP0 lists, apart from what differs by architecture (NTDLL's x87 emulator, PINT's cuts).
+- **The compiler's helpers** are NTDLL's on x86 (`_alldiv`, `_aulldiv`, `_allrem`,
+  `_aullrem`, `_allmul`, the shifts, `_chkstk`); nt4compat's `helpers_x86.rs` names the
+  library and defines `_fltused` and the half-float conversions.
+- **`RtlCaptureContext`** (std's backtraces) is XP's on x86; nt4compat's `x86.rs` gives it.
+- **The C maths** come from compiler_builtins' libm, which leaves them out on x86 without
+  SSE2 (rust-lang/rust#114479: an x87 return quiets a signalling NaN); the std patch keeps
+  them for `nt4`.
+- On x86, LLVM puts the C prefix `_` before every symbol, `export_name` included.
+- No C for x86 yet: PINT's SDK compiles for ARM only.
+
+`tests/x86/run-exe.sh BASE_IMAGE PROGRAM.EXE...` runs programs on an x86 NT 4.0 disk
+image in QEMU: it boots a copy, logs on as Administrator (an empty password) by typing
+into the QEMU monitor, runs the programs from a CD-ROM with their output to
+`C:\TMP\RUST`, and reads that back off the disk. `ARGS_STDTEST='one "two words"'` gives
+`examples/stdtest` the arguments it checks for.
 
 ## The target
 

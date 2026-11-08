@@ -24,6 +24,9 @@ pub mod sys;
 #[cfg(target_arch = "arm")]
 #[path = "../../nt4compat/src/helpers.rs"]
 mod helpers;
+#[cfg(target_arch = "x86")]
+#[path = "../../nt4compat/src/helpers_x86.rs"]
+mod helpers_x86;
 #[cfg(all(feature = "rt", not(test)))]
 mod start;
 
