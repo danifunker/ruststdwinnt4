@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""The C compiler of the x86 NT 4.0 target, for cargo's cc crate: clang in cl mode
+(clang-cl), with ruststdwinnt4's C99 layer in every file (crt/include first, nt4c99.h
+forced in) and NT 4.0's headers. tools/x86/nt4cc.py has the details.
+
+    CC_i686_nt4_windows_msvc=tools/nt4-clang-cl   (set by tools/cargo-nt4)
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "x86"))
+import nt4cc  # noqa: E402
+
+crt = nt4cc.crt_include()
+args = [nt4cc.clang(), "--driver-mode=cl", f"--target={nt4cc.TARGET}",
+        "/clang:-march=pentium", "/clang:-mno-mmx", "/clang:-mno-sse",
+        "/X", "/GS-", "-Wno-microsoft", f"-I{crt}"] + nt4cc.LENIENT
+if not os.environ.get("NT4_CLANG_NO_FI"):  # crt/build.sh: the layer's own sources
+    args.append(f"/FI{os.path.join(crt, 'nt4c99.h')}")
+if os.environ.get("NT4_WINAPI") == "winsdk":
+    args.append("/clang:-std=gnu11")  # C11 with typeof, which cl accepts in C11 mode
+args += nt4cc.winsdk_defines()
+args += ["/clang:-isystem" + d for d in nt4cc.early_includes()]
+for d in nt4cc.system_includes():
+    args += ["-imsvc", d]
+# Not cc's -arch:SSE2 (its default for i686): NT 4.0 never enables SSE.
+args += [a for a in sys.argv[1:] if a.lower() not in ("-arch:sse2", "/arch:sse2", "-arch:sse", "/arch:sse")]
+os.execv(args[0], args)

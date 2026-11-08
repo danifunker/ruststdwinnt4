@@ -16,8 +16,9 @@
 #     (RtlGenRandom, which nt4compat gives, not Windows 10's ProcessPrng);
 #   - NT 4.0 versions of the crates.io crates that need one (tools/nt4-crates.py), as
 #     [patch.crates-io] entries for the project in the current directory;
-#   - when PINT's SDK is there (tools/pint-sdk), C for the target: the cc crate compiles
-#     with its cl (tools/nt4-cl) and archives with rust-lld (tools/nt4-lib), and programs
+#   - when PINT's SDK is there (tools/pint-sdk), C for the target. On ARM the cc crate
+#     compiles with its cl (tools/nt4-cl), on x86 with clang in cl mode and the SDK's
+#     NT 4.0 headers (tools/nt4-clang-cl); it archives with rust-lld (tools/nt4-lib), and programs
 #     link NT 4.0's C run-time, PINT's msvcrt.dll, ahead of everything else (ntdll also
 #     exports some C functions, and C code must take them all from one run-time), and
 #     oldnames.lib (the POSIX names), and ruststdwinnt4's C99 layer (crt/, nt4c99.lib).
@@ -49,6 +50,14 @@ if [ "$ARCH" = arm ] && [ -d "$PINT_SDK/rootfs/opt/pint40sdk/lib" ]; then
     # After ours, so NT 4.0's import libraries are the ones found first.
     "$ROOT/crt/build.sh" >/dev/null
     flags="$flags -L native=$PINT_SDK/rootfs/opt/pint40sdk/lib -Z pre-link-arg=msvcrt.lib -C link-arg=oldnames.lib -C link-arg=$ROOT/target/crt/$ARCH/nt4c99.lib"
+elif [ "$ARCH" = x86 ] && [ -d "$PINT_SDK/rootfs/opt/pint40sdk/include" ] \
+        && { [ -n "${NT4_CLANG:-}" ] || command -v clang-18 >/dev/null || command -v clang >/dev/null; }; then
+    # x86: clang in cl mode (tools/nt4-clang-cl) with NT 4.0's headers from PINT's SDK;
+    # msvcrt.lib and oldnames.lib are ours (tools/mkimplibs.sh x86).
+    t=$(echo "$TARGET" | tr - _)
+    export "CC_$t=$ROOT/tools/nt4-clang-cl" "AR_$t=$ROOT/tools/nt4-lib"
+    "$ROOT/crt/build.sh" x86 >/dev/null
+    flags="$flags -Z pre-link-arg=msvcrt.lib -C link-arg=oldnames.lib -C link-arg=$ROOT/target/crt/$ARCH/nt4c99.lib"
 fi
 export "CARGO_TARGET_${V}_RUSTFLAGS=$flags ${NT4_RUSTFLAGS:-}"
 

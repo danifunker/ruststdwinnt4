@@ -1,0 +1,3 @@
+#!/bin/sh
+# ranlib: rust-lld's lib mode (tools/x86/nt4-ar) makes the index itself.
+exit 0

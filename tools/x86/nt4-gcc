@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""A cc with GCC's arguments for x86 Windows NT 4.0, for configure scripts and makefiles:
+clang (GCC-style already) with tools/x86/nt4cc.py's settings, linking with rust-lld
+against NT 4.0's import libraries, oldnames.lib and ruststdwinnt4's C99 layer
+(nt4c99.lib, and crt0.obj: the entry point of C programs). The x86 counterpart of
+tools/sdk/nt4-gcc, without a sandbox: it runs on the host.
+
+  PATH=.../tools/x86/bin:$PATH \\
+  CC=.../tools/x86/nt4-gcc AR=.../tools/x86/nt4-ar RANLIB=.../tools/x86/nt4-ranlib \\
+      ./configure --host=i686-w64-mingw32 ...
+
+tools/x86/bin has `lib`, which libtool archives with when the linker is not GNU's.
+
+ruststdwinnt4's C99 headers come after the package's own -I directories, so gnulib's
+replacement headers are found first; nt4c99.h is not forced in (gnulib's headers want
+config.h first, and gnulib replaces what is missing itself). nt4c99.lib, in every link,
+gives snprintf, vsnprintf, strtoll... under their own names.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nt4cc  # noqa: E402
+
+mode, libpath, libs, rest = "link", [], [], []
+a = sys.argv[1:]
+i = 0
+while i < len(a):
+    x = a[i]
+    if x in ("-c", "-S"):
+        mode = "compile"
+    elif x == "-E":
+        mode = "preprocess"
+    elif x == "-shared":
+        sys.exit("nt4-gcc: shared libraries are not supported")
+    elif x.startswith("-L"):
+        if x == "-L":
+            i += 1
+            x = "-L" + a[i]
+        libpath.append(x[2:])
+        i += 1
+        continue
+    elif x.startswith("-l") and len(x) > 2:
+        libs.append(x[2:])
+        i += 1
+        continue
+    elif x in ("-pthread", "-rdynamic", "-static"):
+        i += 1
+        continue
+    rest.append(x)
+    i += 1
+
+cmd = [nt4cc.clang(), f"--target={nt4cc.TARGET}", "-march=pentium", "-mno-mmx", "-mno-sse",
+       "-fms-runtime-lib=dll", "-fno-stack-protector", "-Wno-microsoft"] + nt4cc.LENIENT
+if os.environ.get("NT4_WINAPI") == "winsdk":
+    cmd.append("-std=gnu11")  # C11 with typeof, which cl accepts in C11 mode
+cmd += nt4cc.winsdk_defines()
+cmd += rest
+cmd.append("-I" + nt4cc.crt_include())
+for d in nt4cc.early_includes():
+    cmd += ["-isystem", d]
+for d in nt4cc.system_includes():
+    cmd += ["-idirafter", d]
+
+if mode == "link":
+    dirs = libpath + ["."] + nt4cc.libdirs()
+    for n in libs:
+        # -lNAME: NAME.lib, or libtool's libNAME.lib or libNAME.a, in the -L directories.
+        found = next((os.path.join(d, f) for d in dirs for f in (f"{n}.lib", f"lib{n}.lib", f"lib{n}.a")
+                      if os.path.isfile(os.path.join(d, f))), None)
+        cmd.append(found or f"-l{n}")  # clang hands it to the linker as NAME.lib
+    crt = os.path.join(nt4cc.ROOT, "target", "crt", "x86")
+    for f in ("crt0.obj", "nt4c99.lib"):
+        if os.path.isfile(os.path.join(crt, f)):
+            cmd.append(os.path.join(crt, f))
+    # msvcrt before ntdll, which exports some C functions too: C code takes them all from
+    # one run-time. ntdll: the 64-bit integer helpers, _chkstk.
+    cmd += ["-lmsvcrt", "-loldnames", "-lkernel32", "-lntdll"]
+    cmd += ["-fuse-ld=lld", "-B" + os.path.dirname(nt4cc.lld_link())]  # finds lld-link there
+    cmd += ["-Wl,-libpath:" + d for d in libpath + nt4cc.libdirs()]
+    cmd += ["-Xlinker", "-subsystem:console,4.0", "-Xlinker", "-osversion:4.0", "-Xlinker", "-nodefaultlib:libcmt"]
+os.execv(cmd[0], cmd)

@@ -5,7 +5,7 @@ A Rust runtime, and later a `std` port, for Windows NT 4.0 SP0. The first target
 x86 NT 4.0 (`i686-nt4-windows-msvc`) is the second. Built with Rust 1.90, the version mrustc can bootstrap, so the same
 patches can later reach Alpha and PowerPC through mrustc.
 
-Status: layers 0 to 3, for PINT and x86. `std` programs run on PINT: threads and locks,
+Status: layers 0 to 3, for PINT and x86. `std` programs run on PINT and x86 NT 4.0: threads and locks,
 thread-locals, files and directories, processes with pipes, TCP and name resolution, time,
 float maths (`examples/stdtest`). `no_std` console and GUI programs run as well. Panics
 abort (no unwinding yet).
@@ -24,10 +24,14 @@ abort (no unwinding yet).
 ## Build
 
 Needs only the pinned Rust (rustup installs it from `rust-toolchain.toml`) and Python 3:
-no MSVC or PINT SDK. `rust-lld` links, and makes the import libraries from `imports/arm/*.def`.
+no MSVC or PINT SDK. `rust-lld` links, and makes the import libraries from `imports/arm/*.def`
+(`tools/implib.py` from `imports/x86/*.def`). C code needs more: see "C code" below.
 
     tools/cargo-nt4 build --release -p hello
     tools/peinfo.py target/thumbv7a-nt4-windows-msvc/release/hello.exe --defs imports/arm
+
+    NT4_TARGET=i686-nt4-windows-msvc tools/cargo-nt4 build --release -p hello
+    tools/peinfo.py target/i686-nt4-windows-msvc/release/hello.exe --defs imports/x86
 
 `tools/cargo-nt4` builds std for the target from a patched copy of the toolchain's
 `rust-src` (`tools/mkstd.sh`: `std/<version>/nt4.patch` applied, `crates/nt4compat` added),
@@ -72,7 +76,9 @@ What is different from ARM:
   (`CreateFileW@28`), and `tools/implib.py` writes the import libraries with the name type
   that strips them (rust-lld's `/def` cannot express it). `tools/gen-defs.py --arch x86`
   makes the lists from an x86 system's DLLs, taking the bytes from the `windows_i686_msvc`
-  crate's import library and `EXTRA_DECORATIONS` for undocumented NTDLL functions.
+  crate's import library, from the system-call stubs themselves (`ret N`: every `Nt*`/`Zw*`
+  of NTDLL, and the win32k calls of gdi32 and user32) and from `EXTRA_DECORATIONS` for
+  the other undocumented NTDLL functions.
   The lists here come from an NT 4.0 SP1 install: its DLLs export exactly the names of the
   SP0 lists, apart from what differs by architecture (NTDLL's x87 emulator, PINT's cuts).
 - **The compiler's helpers** are NTDLL's on x86 (`_alldiv`, `_aulldiv`, `_allrem`,
@@ -83,13 +89,31 @@ What is different from ARM:
   SSE2 (rust-lang/rust#114479: an x87 return quiets a signalling NaN); the std patch keeps
   them for `nt4`.
 - On x86, LLVM puts the C prefix `_` before every symbol, `export_name` included.
-- No C for x86 yet: PINT's SDK compiles for ARM only.
+- **C** is compiled by clang rather than PINT's SDK, which targets ARM only (see "C code"
+  NT 4.0").
+
+### Testing on x86
+
+    NT4_TARGET=i686-nt4-windows-msvc tools/cargo-nt4 build --release -p hello -p reboot
+    tests/x86/run-exe.sh nt4.qcow2 target/i686-nt4-windows-msvc/release/hello.exe
 
 `tests/x86/run-exe.sh BASE_IMAGE PROGRAM.EXE...` runs programs on an x86 NT 4.0 disk
-image in QEMU: it boots a copy, logs on as Administrator (an empty password) by typing
-into the QEMU monitor, runs the programs from a CD-ROM with their output to
-`C:\TMP\RUST`, and reads that back off the disk. `ARGS_STDTEST='one "two words"'` gives
-`examples/stdtest` the arguments it checks for.
+image in QEMU, about 3 minutes a run. It boots an overlay of the image, logs on by
+typing into the QEMU monitor, starts the programs from a CD-ROM with their output to
+`C:\TMP\RUST`, and reads that back off the disk. Each step waits for the screen to react
+and settle (`tests/pint/mon.py settle`, from screen dumps), not a fixed time. The batch
+file ends with `examples/reboot` (built for x86), and QEMU runs with `-no-reboot`, so the
+restart, which flushes the disk, ends the run. NTFS is read but never written from Linux.
+
+- The image must boot to "Press Ctrl+Alt+Delete" and log on an administrator (the
+  shutdown privilege). `NT_USER` (default: the name the logon dialog shows, the last to
+  log on) and `NT_PASSWORD` (default: empty) are typed.
+- `QEMU` must have user networking (`-netdev user`). By default the harness takes the
+  first `qemu-system-i386` on `PATH`, then `/usr/bin`'s, that has it. A QEMU built without
+  slirp (some `/usr/local` builds) is passed over.
+- `ARGS_STDTEST='one "two words"'` gives `examples/stdtest` the arguments it checks for;
+  `TIMEOUT` (default 600 s) bounds the programs; `KEEP=1` keeps the work directory with a
+  screen dump of each step.
 
 ## The target
 
@@ -120,7 +144,13 @@ NT 4.0's. Only names are taken.
 
 The DLLs: kernel32, ntdll, advapi32, userenv, ws2_32, wsock32, and for GUI programs user32,
 gdi32, comctl32 (4.70: no functions or messages of Internet Explorer's later versions),
-comdlg32, shell32, ole32, oleaut32, opengl32, imm32, version, winmm.
+comdlg32, shell32, ole32, oleaut32, opengl32, imm32, version, winmm. x86 also has
+winspool.drv (PINT has no print spooler). Its list comes from SP1, like the others, but
+unlike them it has no SP0 list to be compared with.
+
+`imports/x86/oldnames.txt` lists the old names of msvcrt.dll's functions (`open` for
+`_open`). `tools/implib.py --aliases` makes `oldnames.lib` from it: weak aliases, as
+Microsoft's is. On ARM, PINT's SDK has one.
 
 ## std on NT 4.0
 
@@ -205,6 +235,45 @@ that checks the version (gnulib) builds then, and the import check still rejects
 4.0 lacks. vintrdp's `scripts/dist/build-deps-nt4.sh` (its `nt4` branch) builds GMP,
 Nettle, libtasn1, libiconv and GnuTLS this way. `crt/test/cryptotest.c` and
 `examples/tlstest` (a TLS 1.3 handshake between two threads) check them on PINT.
+
+### C for x86
+
+PINT's SDK compiles for ARM only, so x86 C is compiled by clang (`clang-18`, or
+`NT4_CLANG`), the same LLVM as rustc's, on the host: no Wine, no sandbox, no Microsoft
+compiler. It needs the NT 4.0 headers from PINT's SDK (`tools/pint-sdk fetch`; its
+`include` and `include/crt` are NT 4.0's, for every architecture), and, for
+`NT4_WINAPI=winsdk`, the Windows SDK headers installed with Microsoft C for ARM
+(`PINT_MSVC`). The libraries are all ours: NT 4.0's import libraries, `msvcrt.lib`
+among them, and `oldnames.lib` (`tools/mkimplibs.sh x86`), and the C99 layer
+(`crt/build.sh x86`). `tools/x86/nt4cc.py` has the settings: a Pentium without MMX or
+SSE, `-MD`, no `/GS` security cookie (NT 4.0's msvcrt.dll has no `__security_cookie`).
+
+- `cargo-nt4` gives the `cc` crate `tools/nt4-clang-cl` (clang in cl mode) when the SDK's
+  headers and clang are there; programs link msvcrt.lib first, as on ARM.
+  `examples/cmix` builds this way.
+- `tools/x86/nt4-gcc`, `nt4-ar` and `nt4-ranlib` are the GCC-style tools for configure
+  scripts and makefiles (`--host=i686-w64-mingw32`), with `tools/x86/bin` on `PATH` for
+  libtool's `lib`. A C program gets `crt/x86/crt0.c` as its start (`mainCRTStartup`: the
+  initializer tables, `__getmainargs`, `main`; and the TLS directory), which a Rust
+  program, having nt4compat's, never links. `crt/test/c99test.c` runs on x86 NT 4.0 this
+  way.
+
+Where clang and cl differ, the tools follow cl, which the ARM builds rely on:
+
+- What cl only warns about is a warning (an undeclared function, `int` conversions);
+  C is `gnu11` for `typeof`.
+- `NT4_WINAPI=winsdk` headers are seen through `target/winsdk-ci`, links that make them
+  case-insensitive as on Windows (`Windows.h` included as `windows.h`). An `io.h` there
+  adds `vcruntime.h` to NT 4.0's, as today's `io.h` does: gnulib takes `intptr_t` from it.
+- `_tls_array`, the TEB offset Microsoft C's x86 thread-locals are reached through, is
+  defined by nt4compat (Rust programs) and `crt0.c` (C programs).
+
+With these, vintrdp's dependencies build for x86: GMP, Nettle, libtasn1 and libiconv as
+on ARM, and GnuTLS with `NT4_WINAPI=winsdk`. Its script has the target, the host triple
+and the SDK sandbox fixed for ARM. Run with `--host=i686-w64-mingw32`, the `tools/x86`
+wrappers, `tools/x86/bin` on `PATH`, no sandbox and, for GMP, `gmp_cv_asm_w32=.long`
+(GMP probes the assembler with `nm` on x86 even without assembly), it builds them all.
+`crt/test/cryptotest.c` and `examples/tlstest` link with them for x86.
 
 ## Testing on PINT
 

@@ -1,0 +1,5 @@
+#!/bin/sh
+# lib for libtool, which archives with Microsoft's `lib -OUT:...` when the linker is not
+# GNU's (as tools/x86/nt4-gcc's is not): rust-lld's lib mode (tools/nt4-lib). Put this
+# directory on PATH for configure and make.
+exec "$(dirname "$0")/../../nt4-lib" "$@"

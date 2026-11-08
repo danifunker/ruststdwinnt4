@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""ar for x86 NT 4.0 libraries, for makefiles and libtool (tools/x86/nt4-gcc):
+  ar cru|rcs|cr|r LIB OBJS...   make or extend LIB (rust-lld's lib mode, which writes
+                                the index Microsoft's linkers read)
+  ar t LIB                      list its members
+  ar x LIB [MEMBERS...]         extract members into the current directory (libtool
+                                merges convenience libraries this way)
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import nt4cc  # noqa: E402
+
+
+def members(path):
+    """(name, data) of each member, the linker members left out."""
+    with open(path, "rb") as f:
+        d = f.read()
+    if d[:8] != b"!<arch>\n":
+        sys.exit(f"nt4-ar: {path}: not an archive")
+    o, longnames, out = 8, b"", []
+    while o + 60 <= len(d):
+        name = d[o : o + 16].decode().rstrip()
+        size = int(d[o + 48 : o + 58])
+        data = d[o + 60 : o + 60 + size]
+        o += 60 + size + (size & 1)
+        if name == "/":
+            continue
+        if name == "//":
+            longnames = data
+            continue
+        if name.startswith("/") and name[1:].isdigit():
+            s = int(name[1:])
+            # Microsoft's (and lld's) long names end with NUL, GNU's with "/\n".
+            e = min(i for i in (longnames.find(b"\0", s), longnames.find(b"\n", s), len(longnames)) if i >= 0)
+            name = longnames[s:e].decode().rstrip("/")
+        else:
+            name = name.rstrip("/")
+        out.append((name, data))
+    return out
+
+
+if len(sys.argv) < 3:
+    sys.exit("nt4-ar: usage: nt4-ar OPS LIB [FILES...]")
+ops, lib, objs = sys.argv[1].lstrip("-"), sys.argv[2], sys.argv[3:]
+if "t" in ops:
+    for n, _ in members(lib):
+        print(n)
+    sys.exit(0)
+if "x" in ops:
+    want = {os.path.basename(o.replace("\\", "/")) for o in objs}
+    for n, data in members(lib):
+        base = os.path.basename(n.replace("\\", "/"))
+        if not want or base in want:
+            with open(base, "wb") as f:
+                f.write(data)
+    sys.exit(0)
+lld = os.path.join(os.path.dirname(nt4cc.lld_link()), "lld-link")
+inputs = list(objs)
+if os.path.isfile(lib) and "r" in ops or "q" in ops and os.path.isfile(lib):
+    inputs.insert(0, lib)
+os.execv(lld, [lld, "/lib", "/nologo", "/machine:x86", f"/out:{lib}", *inputs])

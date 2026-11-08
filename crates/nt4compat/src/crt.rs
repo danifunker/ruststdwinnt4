@@ -107,6 +107,11 @@ static mut TLS_END: u8 = 0;
 #[used]
 static mut TLS_INDEX: u32 = 0;
 
+// Microsoft C's x86 code reaches its thread-locals through fs:[_tls_array]: the offset of
+// the TEB's ThreadLocalStoragePointer, an absolute symbol the C run-time defines.
+#[cfg(target_arch = "x86")]
+core::arch::global_asm!(".globl __tls_array", ".set __tls_array, 0x2C");
+
 #[link_section = ".CRT$XLA"]
 #[used]
 static XL_A: Option<TlsCallback> = None;
