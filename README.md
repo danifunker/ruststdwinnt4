@@ -39,6 +39,14 @@ with `-Zbuild-std=std,panic_abort` and `RUSTC_BOOTSTRAP=1` (a JSON target and `-
 a stable release). `tools/peinfo.py` shows the headers NT 4.0 checks
 and fails when an import is not exported by NT 4.0 SP0.
 
+After a `build`, `cargo-nt4` runs that check itself on every `.exe` and `.dll` cargo made
+(or found up to date), and fails the build when an image imports what NT 4.0 SP0 lacks or
+is marked for a later Windows. The import libraries already stop most such imports at the
+link; the check catches the rest (`raw-dylib`, import libraries a crate brings). It runs
+cargo with `--message-format=json-render-diagnostics` to learn the images
+(`tools/nt4-artifacts.py`), unless the command line gives a `--message-format` of its own,
+whose messages are then passed on unchanged. `NT4_NO_IMPORT_CHECK=1` turns it off.
+
 Another project builds the same way, from its own directory:
 
     cd ../some-project && ../ruststdwinnt4/tools/cargo-nt4 build --release

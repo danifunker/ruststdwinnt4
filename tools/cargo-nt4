@@ -24,6 +24,10 @@
 #     oldnames.lib (the POSIX names), and ruststdwinnt4's C99 layer (crt/, nt4c99.lib).
 # Local settings (PINT_SDK, PINT_MSVC) can go in nt4.env at the top of this repository.
 # no_std programs do not link std.
+#
+# After a build, every .exe and .dll cargo made is checked with tools/peinfo.py against
+# NT 4.0 SP0's exports (imports/<arch>), and the build fails on an import NT 4.0 lacks.
+# NT4_NO_IMPORT_CHECK=1 skips the check.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET=${NT4_TARGET:-thumbv7a-nt4-windows-msvc}
@@ -67,4 +71,33 @@ if [ -f Cargo.toml ]; then
 fi
 
 cmd=$1; shift
-exec cargo "$cmd" ${config[@]+"${config[@]}"} -Zbuild-std=std,panic_abort -Zbuild-std-features=compiler-builtins-mem "$@"
+args=(${config[@]+"${config[@]}"} -Zbuild-std=std,panic_abort -Zbuild-std-features=compiler-builtins-mem "$@")
+if [ "$cmd" != build ] || [ -n "${NT4_NO_IMPORT_CHECK:-}" ]; then
+    exec cargo "$cmd" "${args[@]}"
+fi
+
+# build: cargo runs as a child, and every .exe and .dll it reports (built now or already
+# fresh) is checked against NT 4.0 SP0's exports (tools/peinfo.py --defs imports/<arch>).
+# Cargo's JSON messages name the images; its diagnostics still go to stderr as usual.
+# When the caller asked for a --message-format, its messages are passed on unchanged.
+fmt=--message-format=json-render-diagnostics
+for a in "$@"; do case $a in --message-format*) fmt= ;; esac; done
+images=$(mktemp)
+trap 'rm -f "$images"' EXIT
+set +e
+cargo build ${fmt:+"$fmt"} "${args[@]}" | python3 "$ROOT/tools/nt4-artifacts.py" "$images" ${fmt:+--quiet}
+status=${PIPESTATUS[0]}
+set -e
+[ "$status" = 0 ] || exit "$status"
+failed=0
+while IFS= read -r image; do
+    if out=$(python3 "$ROOT/tools/peinfo.py" "$image" --defs "$ROOT/imports/$ARCH" 2>&1); then
+        echo "cargo-nt4: $image: imports are in NT 4.0 SP0" >&2
+    else
+        echo "cargo-nt4: $image fails the NT 4.0 check:" >&2
+        # peinfo's errors, or all of its output when it failed some other way.
+        printf '%s\n' "$out" | grep '^ERROR' >&2 || printf '%s\n' "$out" >&2
+        failed=1
+    fi
+done < "$images"
+[ "$failed" = 0 ] || { echo "cargo-nt4: an image imports what NT 4.0 SP0 lacks (NT4_NO_IMPORT_CHECK=1 skips the check)" >&2; exit 1; }
