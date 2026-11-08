@@ -94,9 +94,19 @@ def locked(project):
     for block in text.split("[[package]]")[1:]:
         name = re.search(r'^name = "([^"]+)"', block, re.M)
         version = re.search(r'^version = "([^"]+)"', block, re.M)
-        source = re.search(r'^source = "registry\+', block, re.M)
-        if name and version and source and name.group(1) in EDITS:
-            yield name.group(1), version.group(1)
+        if not (name and version and name.group(1) in EDITS):
+            continue
+        name, version = name.group(1), version.group(1)
+        # From crates.io; or already our copy: once cargo has taken a patch, Cargo.lock
+        # records the package with no source, and leaving the patch out of the next build
+        # would put crates.io's back without a word.
+        source = re.search(r'^source = "([^"]*)"', block, re.M)
+        if source:
+            ours = source.group(1).startswith("registry+")
+        else:
+            ours = os.path.isdir(os.path.join(OUT, f"{name}-{version}"))
+        if ours:
+            yield name, version
 
 
 def registry_source(project, name, version):
