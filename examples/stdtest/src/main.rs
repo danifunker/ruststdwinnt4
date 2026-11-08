@@ -87,8 +87,11 @@ fn condvar_and_rwlock() -> R {
         })
         .collect();
     for _ in 0..200 {
-        rw.write().unwrap().push(0);
-        rw.write().unwrap().pop();
+        // One write guard for both: a reader sees 4 elements only if the lock fails.
+        let mut v = rw.write().unwrap();
+        v.push(0);
+        thread::yield_now();
+        v.pop();
     }
     for r in readers {
         ensure(r.join().unwrap() == 1500, || "reader saw a torn vector".into())?;
@@ -330,6 +333,52 @@ fn random_bytes() -> R {
     Ok(())
 }
 
+/// nt4compat's RtlCaptureContext (x86 NT 4.0 lacks it; std's backtraces call it): every
+/// register it records, against values set just before the call.
+#[cfg(target_arch = "x86")]
+fn capture_context() -> R {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn RtlCaptureContext(context: *mut u8);
+    }
+    #[repr(C, align(16))]
+    struct Context([u8; 0x2CC]);
+    let mut c = Context([0; 0x2CC]);
+    let f: unsafe extern "system" fn(*mut u8) = RtlCaptureContext;
+    let (esp, eip, cs, ss): (u32, u32, u32, u32);
+    unsafe {
+        core::arch::asm!(
+            "push ebx", "push esi", "push edi", "push ebp",
+            "push eax",          // the CONTEXT
+            "mov ebp, edx",      // RtlCaptureContext
+            "mov ebx, 0x11111111", "mov esi, 0x22222222", "mov edi, 0x33333333",
+            "mov edx, 0x44444444", "mov ecx, 0x55555555", "mov eax, 0x66666666",
+            "call ebp",
+            "2:",
+            "mov eax, esp",
+            "lea ecx, [2b]",
+            "pop ebp", "pop edi", "pop esi", "pop ebx",
+            "xor edx, edx", "mov dx, cs",
+            "xor edi, edi", "mov di, ss",
+            inout("eax") c.0.as_mut_ptr() => esp,
+            inout("edx") f => cs,
+            out("ecx") eip,
+            out("edi") ss,
+        );
+    }
+    let get = |o: usize| u32::from_le_bytes(c.0[o..o + 4].try_into().unwrap());
+    let want = [
+        ("ContextFlags", 0x00, 0x10003), ("Ebx", 0xA4, 0x11111111), ("Esi", 0xA0, 0x22222222),
+        ("Edi", 0x9C, 0x33333333), ("Edx", 0xA8, 0x44444444), ("Ecx", 0xAC, 0x55555555),
+        ("Eax", 0xB0, 0x66666666), ("Ebp", 0xB4, f as usize as u32), ("Eip", 0xB8, eip),
+        ("Esp", 0xC4, esp), ("SegCs", 0xBC, cs), ("SegSs", 0xC8, ss),
+    ];
+    for (name, o, v) in want {
+        ensure(get(o) == v, || format!("{name} {:#x}, expected {v:#x}", get(o)))?;
+    }
+    ensure(get(0xC0) & 0x202 == 0x202, || format!("EFlags {:#x}", get(0xC0)))
+}
+
 fn main() {
     let v = std::process::Command::new("cmd").args(["/c", "ver"]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
     println!("std on Windows NT 4.0 ({v})");
@@ -346,6 +395,8 @@ fn main() {
     check(&mut failures, "time, sleep", time);
     check(&mut failures, "network (TCP, resolve)", network);
     check(&mut failures, "float maths", float_maths);
+    #[cfg(target_arch = "x86")]
+    check(&mut failures, "RtlCaptureContext", capture_context);
     if failures == 0 {
         println!("stdtest: ok");
     } else {
