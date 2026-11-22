@@ -43,10 +43,12 @@ fetch() {
     python3 -I "$ROOT/tools/unpack-image.py" manifest.json blobs rootfs
     # The tools configure scripts need that the image lacks (it is Debian: apt works in
     # the sandbox, as root of a tree we own).
-    "$0" sh -c 'apt-get -o APT::Sandbox::User=root -qq update &&
+    # (By its full path: this function has left the directory it may have been named from.)
+    "$ROOT/tools/pint-sdk" sh -c 'apt-get -o APT::Sandbox::User=root -qq update &&
         DEBIAN_FRONTEND=noninteractive apt-get -o APT::Sandbox::User=root -y -qq \
             install --no-install-recommends m4 pkgconf xz-utils file gcc libc6-dev && apt-get clean' 2>&1 \
-        | grep -v '^W: chown' || true
+        | { grep -v '^W: chown' || true; }
+    [ "${PIPESTATUS[0]}" = 0 ] || { echo "pint-sdk: installing the build tools failed" >&2; exit 1; }
     echo "pint-sdk: $SDK/rootfs"
 }
 
