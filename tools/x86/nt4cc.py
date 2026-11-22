@@ -76,7 +76,8 @@ def case_folded(srcs):
     each spelling the headers' #include lines use."""
     import re
     outs = [os.path.join(ROOT, "target", "winsdk-ci", s.strip("/").replace("/", "_")) for s in srcs]
-    stamp = os.path.join(ROOT, "target", "winsdk-ci", ".done-" + "+".join(os.path.basename(o) for o in outs))
+    import hashlib  # (the directories' names joined can be longer than a file name may be)
+    stamp = os.path.join(ROOT, "target", "winsdk-ci", ".done-" + hashlib.sha256("+".join(outs).encode()).hexdigest()[:16])
     if os.path.exists(stamp):
         return outs
     inc = re.compile(rb'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.M)
