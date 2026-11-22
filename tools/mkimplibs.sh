@@ -3,7 +3,7 @@
 # the pinned toolchain (its llvm-lib mode), so no Microsoft tool is needed.
 #
 #   tools/mkimplibs.sh [ARCH]      # default arm: imports/arm/*.def -> target/implib/arm/*.lib
-#                                  # x86: also imports/x86/oldnames.txt -> oldnames.lib
+#                                  # and imports/ARCH/oldnames.txt -> oldnames.lib
 #
 # x86 import libraries are written by tools/implib.py instead: their names are decorated
 # (_CreateFileW@28) and must be imported plain, which rust-lld's /def cannot express.
@@ -31,10 +31,10 @@ for def in imports/$ARCH/*.def; do
         changed=1
     fi
 done
-# x86: oldnames.lib, the old names of msvcrt.dll's functions (open for _open), for C code.
-# On ARM, PINT's SDK has one.
-if [ "$ARCH" = x86 ] && [ ! "$OUT/oldnames.lib" -nt imports/x86/oldnames.txt ]; then
-    python3 tools/implib.py --aliases imports/x86/oldnames.txt --out "$OUT/oldnames.lib"
+# oldnames.lib, the old names of msvcrt.dll's functions (open for _open), for C code:
+# ours on both, so C linked in needs nothing of PINT's SDK (see NT4_C99_LIB in cargo-nt4).
+if [ ! "$OUT/oldnames.lib" -nt imports/$ARCH/oldnames.txt ] || [ ! "$OUT/oldnames.lib" -nt tools/implib.py ]; then
+    python3 tools/implib.py --aliases imports/$ARCH/oldnames.txt --arch "$ARCH" --out "$OUT/oldnames.lib"
 fi
 
 # The windows-targets crate (behind windows-sys up to 0.60) links one import library for

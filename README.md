@@ -158,7 +158,9 @@ unlike them it has no SP0 list to be compared with.
 
 `imports/x86/oldnames.txt` lists the old names of msvcrt.dll's functions (`open` for
 `_open`). `tools/implib.py --aliases` makes `oldnames.lib` from it: weak aliases, as
-Microsoft's is. On ARM, PINT's SDK has one.
+Microsoft's is. `imports/arm/oldnames.txt` is the same list for ARM, kept to what PINT's
+msvcrt.dll exports, and `--arch arm` writes it as ARM objects, without x86's `_` before
+each name; so on both, C needs nothing of PINT's SDK to be linked.
 
 ## std on NT 4.0
 
@@ -224,6 +226,12 @@ gives it Wine paths) and archive with rust-lld (`tools/nt4-lib`), and links prog
 NT 4.0's C run-time, PINT's `msvcrt.dll`, ahead of the other import libraries (ntdll also
 exports some C functions, and C code must take them all from one run-time), and the SDK's
 `oldnames.lib`. `examples/cmix` is C in a Rust program, calling back into Rust.
+
+C compiled elsewhere links without the SDK or any compiler: `NT4_C99_LIB=path/nt4c99.lib
+tools/cargo-nt4 build ...` links static C libraries (given to the linker as the project
+does) and the C99 layer they were built with against NT 4.0's `msvcrt.dll`, through this
+repository's own `msvcrt.lib` and `oldnames.lib`. A CI build can so link C libraries built
+once with the SDK, and leave the SDK out (vintrdp's GnuTLS for NT 4.0 is built this way).
 
 The C run-time's `time()` follows its own idea of the time zone: on PINT's image it is 8
 hours from Windows' UTC.

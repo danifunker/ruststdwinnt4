@@ -27,6 +27,7 @@ import argparse
 import re
 import struct
 
+MACHINE_ARMNT = 0x1C4
 MACHINE_I386 = 0x14C
 # IMPORT_OBJECT_NAME_TYPE
 NAME = 1  # the symbol is the export
@@ -74,9 +75,9 @@ def import_object(sym, dll, name_type):
     return head + data
 
 
-def alias_object(name, target):
+def alias_object(name, target, machine=None):
     """A COFF object whose weak externals make NAME and __imp_NAME aliases of TARGET and
-    __imp_TARGET (IMAGE_WEAK_EXTERN_SEARCH_ALIAS)."""
+    __imp_TARGET (IMAGE_WEAK_EXTERN_SEARCH_ALIAS), for MACHINE (x86 by default)."""
     strtab, syms = b"", b""
 
     def sym_name(n):
@@ -97,7 +98,7 @@ def alias_object(name, target):
         syms += sym_name(alias) + struct.pack("<IhHBB", 0, 0, 0, IMAGE_SYM_CLASS_WEAK_EXTERNAL, 1)
         syms += struct.pack("<II10x", index, IMAGE_WEAK_EXTERN_SEARCH_ALIAS)
         index += 3
-    head = struct.pack("<HHIIIHH", MACHINE_I386, 0, 0, 20, index, 0, 0)
+    head = struct.pack("<HHIIIHH", machine or MACHINE_I386, 0, 0, 20, index, 0, 0)
     return head + syms + struct.pack("<I", 4 + len(strtab)) + strtab
 
 
@@ -159,7 +160,9 @@ def write_lib(dll, exports, out):
     write_archive(members, out)
 
 
-def write_aliases(path, out):
+def write_aliases(path, out, arch="x86"):
+    # x86 C names have a '_' before each; ARM's have none.
+    prefix, machine = ("_", MACHINE_I386) if arch == "x86" else ("", MACHINE_ARMNT)
     members = []
     with open(path) as f:
         for line in f:
@@ -167,9 +170,8 @@ def write_aliases(path, out):
             if not line:
                 continue
             name, target = line
-            # The C names: x86's '_' before each.
-            members.append((f"{len(members)}.obj/", alias_object("_" + name, "_" + target),
-                            ["_" + name, "__imp__" + name]))
+            members.append((f"{len(members)}.obj/", alias_object(prefix + name, prefix + target, machine),
+                            [prefix + name, "__imp_" + prefix + name]))
     write_archive(members, out)
 
 
@@ -179,9 +181,10 @@ def main():
     src.add_argument("--def", dest="deffile")
     src.add_argument("--aliases", help="a list of NAME TARGET lines: write weak aliases")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--arch", choices=["x86", "arm"], default="x86", help="for --aliases: the objects' machine")
     a = ap.parse_args()
     if a.aliases:
-        write_aliases(a.aliases, a.out)
+        write_aliases(a.aliases, a.out, a.arch)
     else:
         dll, exports = read_def(a.deffile)
         write_lib(dll, exports, a.out)
