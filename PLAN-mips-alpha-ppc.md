@@ -1,16 +1,17 @@
 # Plan: MIPS, Alpha and PowerPC (parked)
 
-Status: **parked**. PINT (ARM) and x86 are done. A first feasibility spike ran on
-2026-11-25 (see "Spike, 2026-11-25" below): mrustc's side was measured, Visual C++ 4.1's
-side was not run yet.
+Status: **parked**. PINT (ARM) and x86 are done. A feasibility spike ran on 2026-11-25
+(see "Spike, 2026-11-25" below): ntsdk builds and runs C on all three CPUs, and mrustc's C
+is a few known changes away from what Visual C++ 4.1 takes.
 
 - 2026-11-08: plan written for Alpha and PowerPC.
 - 2026-11-25: `tenox7/ntsdk` appeared and changes the toolchain side: Microsoft's own C
   compilers for all three, run on Linux or macOS with no VM. MIPS added.
 - 2026-11-25: FX!32 dropped: every CPU gets a native build. That makes mrustc the main
   path, since it is the only one that reaches Alpha and PowerPC.
-- 2026-11-25: spike: mrustc's C for core, alloc, nt4rt and hello measured against
-  Visual C++ 4.1's C89; the C89 mode is about 3 to 5 weeks. `cl` itself not run yet.
+- 2026-11-25: spike: ntsdk's `hello.c` passes on MIPS, Alpha and PowerPC; mrustc's C for
+  core, alloc, nt4rt and hello measured against Visual C++ 4.1; the C89 mode is about
+  3 to 5 weeks.
 
 ## Shape
 
@@ -102,19 +103,30 @@ Tools and inputs are in `tools/ntsdk-spike/` (target files, a hello mrustc can t
 scripts below). mrustc: the user's fork at its `master` (eb5df108), branch `ntsdk-spike`
 with no changes. Rust 1.90's `library/` from rustup's `rust-src`.
 
-### 1. ntsdk itself: not run yet
+### 1. ntsdk itself: passes on all three
 
-The image was fetched without Docker (its layers, 338 MB, unpacked on m900 to
-`/run/media/dani/BigDisk/ntsdk-spike/root`), since m900's Docker keeps its data on the
-full root disk. Running its tools from there was not allowed in that session, so `hello.c`
-has not been built or run with `ntrun` on any CPU. Ways to run it: Docker with its
-data-root moved to BigDisk, a GitHub Actions workflow, or the unpacked tree (the tools are
-a static `ntrun` plus two shell scripts with `/opt` paths in them).
+The workflow `.github/workflows/ntsdk-spike.yml` (this branch) pulls `tenox7/ntsdk` at run
+time on GitHub's Ubuntu runners: no Docker on m900 (its data is on the full root disk)
+and nothing of Microsoft's in the repository. `hello.c` (with an `__int64` and `%I64x`)
+builds with `ntsdk nt40 CPU cl` and runs with `ntrun` on **MIPS, Alpha and PowerPC**:
+`sizeof(void*)` and `sizeof(long)` are 4 on all three. Each compile takes well under a
+second.
 
-Waiting on that: `tools/ntsdk-spike/probe.sh` (27 one-feature probes, `probes/*.c`, a
-table per CPU) and `compile-c.sh CPU FILE.c` (mrustc's C through `cl -c`, with `inc/`
-giving `stdint.h`, `stdbool.h` and empty `intrin.h`/`immintrin.h`; diagnostics counted by
-code, and the time). They answer the open questions below.
+The probes (`probe.sh`, one feature per file, `cl -c -W3`), the same on all three CPUs:
+
+| Rejected | Accepted |
+|---|---|
+| `inline` (`__inline` works) | `unsigned __int64` to and from `double` and `float` |
+| `long long`, `ULL`/`LL` suffixes (`ui64`/`i64` work) | `__int64` `*`, `/`, `%`, shifts; `switch` on an `__int64` |
+| `__alignof` | `$` in names |
+| `__declspec(align(N))`, `__declspec(noreturn)`, `__declspec(selectany)` (C2485) | `__declspec(thread)` |
+| designated initializers | zero-length arrays, in structs and in unions |
+| compound literals | `#pragma pack(push, N)` / `pop` |
+| hex float literals | `#pragma comment(linker, "/alternatename:...")` (compiles; the linker is untested) |
+| declarations after statements | non-constant aggregate initializers, struct return by value, `setjmp` |
+| | kernel32's `Interlocked*` from the NT 4.0 SDK; a 70 KB static array |
+
+`fabsf` is missing from Alpha's and PowerPC's headers (MIPS has it).
 
 ### 2. mrustc's C, measured
 
@@ -137,41 +149,62 @@ code, and the time). They answer the open questions below.
   287 bytes.
 
 **What the C uses that Visual C++ 4.1 lacks.** Counted in all four files, Msvc flavour
-(17 MB without comments), checked by sample; the C89 column is clang's `-std=c89
--pedantic` on the gnu flavour, as a stand-in for `cl` until it runs:
+(17 MB without comments), checked by sample and against clang's `-std=c89 -pedantic`;
+the last column is updated with the probes' results:
 
 | Construct | Count | Where it comes from | For Visual C++ 4.1 |
 |---|---|---|---|
 | `ull`/`ll` literals, `uint64_t` as `long long` | 21,400 | constants, `case` labels | `ui64`/`i64` suffix, `__int64` |
 | `bool`/`_Bool`, `stdint.h`, `stdbool.h`, `intrin.h`, `immintrin.h` | header | prelude | typedefs in the prelude |
 | `inline` | 122 | prelude helpers | `__inline` |
-| `__declspec(selectany)` | 362 | type ids, generic statics | not in 4.1 (to check): link with `-force:multiple`, or define them once |
+| `__declspec(selectany)` | 362 | type ids, generic statics | not in 4.1: link with `-force:multiple`, or define them once |
 | `#pragma comment(linker, "/alternatename:...")` | 36 | weak symbols (`__rust_alloc` and others) | link 3.10 likely lacks it: the driver writes the shims |
 | `__declspec(align(N))` | 686 | `repr(align)`, zero-size arrays | not in 4.1. 607 are `align(1)` (drop). Over 8: 65 types (16 to 256), from core's cache-padded and SIMD types and hello's own `align(64)`: they need padding plus run-time alignment |
-| `#pragma pack(push, N)` | 126 | `repr(packed)` and layout | `push` may be newer than 4.1 (to check) |
+| `#pragma pack(push, N)` | 126 | `repr(packed)` and layout | works |
 | `__alignof` | 2,200 | layout checks (`typedef char x[cond ? 1 : -1]`) | drop them: mrustc computed the layout |
 | designated initializers `{ .raw = ... }` | 995 | every static (a union of the value and its bytes) | put `raw` first in the union, initialize it by position |
 | `InterlockedXxx8/16/64`, `_Interlocked*` | ~900 | atomics | x86 only. NT 4.0's kernel32 has 32-bit `InterlockedExchange`, `...CompareExchange` and `...ExchangeAdd`; 8- and 16-bit ones become loops on the 32-bit word |
 | `_byteswap_*`, `_BitScan*`, `__popcnt` | 150 | prelude | plain C |
 | `fabsf`, `copysignf`, `copysign`, `INFINITY`, `NAN` | 27 | floats | our own helpers |
-| zero-length arrays `raw[0]` | 290 | zero-size statics and types | MSVC allows them in structs (C4200); to check in unions |
+| zero-length arrays `raw[0]` | 290 | zero-size statics and types | work |
 | `__declspec(noreturn)` | 4 | prelude | drop |
-| mixed declarations, `for (int i...)`, non-constant aggregate initializers | 30 | prelude helpers only | rewrite those helpers |
+| mixed declarations, `for (int i...)` | 30 | prelude helpers | rewrite those helpers |
+| `for (unsigned int i = 0; ...)` | 165 | `[x; N]` in generated code | declare `i` in a block around the loop |
+| a `static` after statements | 5 | `mrustc_empty_caller_location` (`#[track_caller]`) | a block around it |
 | repeated `typedef` (C11) | 36 | function-pointer types | emit once |
-| `$` in names | 6,100 | long names cut with a hash | MSVC allows `$` (to check in 4.1) |
+| `$` in names | 6,100 | long names cut with a hash | works |
 
-The generated function bodies are already C89: locals are declared at the top, no
-compound literals, no VLAs. `__int128` is a struct of two 64-bit halves (the Msvc
+The generated function bodies are nearly C89: locals are declared at the top, no
+compound literals, no VLAs; the two exceptions are the `[x; N]` loops and the
+caller-location static in the table. `__int128` is a struct of two 64-bit halves (the Msvc
 flavour does this for 32-bit targets). Of the plan's table, `_Alignof`, designated
 initializers, `static inline`, `__int128` and `__builtin_*` are confirmed (the
 `__builtin_*` names are the prelude's own functions in the Msvc flavour); thread-locals
 don't appear in `no_std` code.
 
-Open until `cl` runs (each has a probe): `unsigned __int64` to and from `double` (later
-Microsoft compilers refuse it, error C2520, and Rust needs it everywhere), `switch` on an
-`__int64`, `__int64` division on MIPS and PowerPC (helper functions in the C library),
-`$` in names, zero-length arrays in unions, `#pragma pack(push)`, `selectany`, and the
-size limits: a 30 MB file, a 58 KB line, a 70 KB static.
+**mrustc's C through `cl`** (the workflow's `compile` job, per CPU, `cl -c -W1` with
+`inc/` for `stdint.h` and friends):
+
+- As generated: every file stops at `cl`'s limit of 100 errors within its first 170 lines,
+  in mrustc's prelude (`inline`, `__declspec`), before any generated code.
+- After `c89filter.pl`, a crude text rewrite for the spike only (`__inline`, `ui64`/`i64`
+  literals, no `__declspec` or `__alignof` checks, statics' unions with `raw` first and
+  initialized by position, blocks around the `[x; N]` loops and the caller-location
+  static): on all three CPUs, hello and `nt4rt` fail only in the prelude (44 errors: its
+  `for (int i ...)` and declarations after statements, and what follows from them).
+  `alloc` adds one: `SliceArcInnerForStatic` is `repr(align(16))` and comes out 12 bytes
+  instead of 16, the alignment problem above. `core` gets to line 131,000 of 520,000
+  before the 100-error limit; past the prelude its errors are calls to the 128-bit
+  helpers (`shr128`...) that the broken prelude failed to define. PowerPC's `core` also
+  fails in the AltiVec code (`core_arch::simd`), which shouldn't be there anyway.
+- No size limit hit: `cl` reads the 30 MB `core` (lines up to 58 KB) and stops after 100
+  errors in 6 to 11 s. Whether it can compile all of it, and in how much memory, is open
+  until the prelude is fixed.
+- No difference between the CPUs in what `cl` accepts, apart from `fabsf` and AltiVec.
+
+Still open: the linker (`alternatename`, `-force:multiple`, link 3.10 on a large object),
+whether `cl` gets through all of `core` and how fast its code runs, and Alpha's and
+PowerPC's code generation (only MIPS's `__int64` helpers were linked, by `hello.c`).
 
 ### 3. Estimate for the C89 mode
 
@@ -188,16 +221,24 @@ easy part (`inline`, headers) and still need the hard part in the generator.
 | Atomics on kernel32's 32-bit Interlocked functions, 8- and 16-bit as loops | 1 to 2 |
 | Alignment over 8: padding and run-time alignment for statics and locals (the `high_align` handling already passes such values by pointer) | 2 to 4 |
 | `selectany` and `alternatename` replacements, with the driver | 1 to 2 |
-| Whatever `cl` finds that the counts can't: conversions, compiler limits (splitting `core`'s 30 MB), code generation bugs | 3 to 10 |
+| `[x; N]` loops and the caller-location static in the generated code | 0.5 |
+| Whatever `cl` still finds: the rest of `core`, compiler limits (splitting `core`'s 30 MB), code generation bugs, the linker | 3 to 10 |
 | `#![no_main]` (or `start` in nt4rt), and a target file per CPU | 1 |
 
-About **3 to 5 weeks** for hello on all three CPUs. Then the driver: mrustc's own
+About **3 to 5 weeks** for hello on all three CPUs; the probes removed the worst risk
+(64-bit integer to floating-point conversions work), so the low end is likelier. Then the driver: mrustc's own
 `minicargo` already builds a cargo package and can stop before the C compiler, so the
 driver is minicargo plus an `ntsdk nt40 CPU cl`/`link` step, import libraries and start-up
 code: **1 to 2 weeks**, then `std` with `std/1.90.0/nt4.patch`. Upstream mrustc doesn't
 take AI-written code (its CONTRIBUTING.md), so all of this stays in the user's fork.
 
 ### 4. The MIPS shortcut: not tried
+
+### Also found
+
+- ntsdk's `axp64` (Platform SDK for Windows 2000 RC2) has `cl` 13.00 for Alpha. Without
+  `-Ap64` it makes 32-bit code, but that SDK has no 32-bit libraries. A possible newer
+  Alpha compiler if 4.1 proves too weak; Visual C++ 6 for Alpha on the NAS is the other.
 
 ## The MIPS shortcut: rustc with COFF objects (to investigate)
 
