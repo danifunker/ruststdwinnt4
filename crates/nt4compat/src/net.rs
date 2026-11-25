@@ -75,6 +75,8 @@ unsafe fn port(service: *const u8) -> u16 {
     (p as u16).to_be()
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_getaddrinfo)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "getaddrinfo")]
 unsafe extern "system" fn getaddrinfo(
     node: *const u8,
     service: *const u8,
@@ -154,6 +156,8 @@ unsafe extern "system" fn getaddrinfo(
     }
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_freeaddrinfo)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "freeaddrinfo")]
 unsafe extern "system" fn freeaddrinfo(mut info: *mut AddrInfo) {
     // SAFETY: entries made by getaddrinfo, one heap block each.
     unsafe {

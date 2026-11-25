@@ -33,6 +33,8 @@ const DONE: usize = 2;
 
 use crate::sync::{wait_on_address as WaitOnAddress, wake_by_address_all as WakeByAddressAll};
 
+// mrustc calls an import by its name (rustc goes through __imp_InitOnceBeginInitialize)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "InitOnceBeginInitialize")]
 unsafe extern "system" fn init_once_begin_initialize(
     once: *mut c_void,
     flags: u32,
@@ -73,6 +75,8 @@ unsafe extern "system" fn init_once_begin_initialize(
     }
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_InitOnceComplete)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "InitOnceComplete")]
 unsafe extern "system" fn init_once_complete(once: *mut c_void, flags: u32, context: *mut c_void) -> BOOL {
     // SAFETY: as above.
     let word = unsafe { &*(once as *const AtomicUsize) };
@@ -88,6 +92,8 @@ unsafe extern "system" fn init_once_complete(once: *mut c_void, flags: u32, cont
 // ---- Processes ----
 
 /// Windows XP SP1: from the process's basic information.
+// mrustc calls an import by its name (rustc goes through __imp_GetProcessId)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "GetProcessId")]
 unsafe extern "system" fn get_process_id(process: HANDLE) -> u32 {
     // PROCESS_BASIC_INFORMATION: ExitStatus, PebBaseAddress, AffinityMask, BasePriority,
     // UniqueProcessId, InheritedFromUniqueProcessId.
@@ -106,6 +112,8 @@ unsafe extern "system" fn get_process_id(process: HANDLE) -> u32 {
 
 const ERROR_NOT_SUPPORTED: u32 = 50;
 
+// mrustc calls an import by its name (rustc goes through __imp_InitializeProcThreadAttributeList)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "InitializeProcThreadAttributeList")]
 unsafe extern "system" fn initialize_proc_thread_attribute_list(
     _list: *mut c_void,
     _count: u32,
@@ -116,6 +124,8 @@ unsafe extern "system" fn initialize_proc_thread_attribute_list(
     sys::fail(ERROR_NOT_SUPPORTED)
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_UpdateProcThreadAttribute)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "UpdateProcThreadAttribute")]
 unsafe extern "system" fn update_proc_thread_attribute(
     _list: *mut c_void,
     _flags: u32,
@@ -128,6 +138,8 @@ unsafe extern "system" fn update_proc_thread_attribute(
     sys::fail(ERROR_NOT_SUPPORTED)
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_DeleteProcThreadAttributeList)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "DeleteProcThreadAttributeList")]
 unsafe extern "system" fn delete_proc_thread_attribute_list(_list: *mut c_void) {}
 
 // ---- Strings ----
@@ -138,6 +150,8 @@ const CSTR_GREATER_THAN: i32 = 3;
 
 /// Windows Vista: compare UTF-16 strings by code unit, optionally ignoring case (by the
 /// system's upper-case table). A length of -1 means NUL-terminated.
+// mrustc calls an import by its name (rustc goes through __imp_CompareStringOrdinal)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "CompareStringOrdinal")]
 unsafe extern "system" fn compare_string_ordinal(
     s1: *const u16,
     n1: i32,
@@ -206,6 +220,8 @@ unsafe extern "system" fn unhandled(pointers: *mut c_void) -> i32 {
 /// Windows XP. NT 4.0 has no vectored handlers; the handler std adds (which reports a
 /// stack overflow) becomes the unhandled-exception filter, so it sees the exceptions
 /// nothing else handled. One handler is kept.
+// mrustc calls an import by its name (rustc goes through __imp_AddVectoredExceptionHandler)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "AddVectoredExceptionHandler")]
 unsafe extern "system" fn add_vectored_exception_handler(_first: u32, handler: Option<Handler>) -> *mut c_void {
     let Some(h) = handler else { return core::ptr::null_mut() };
     HANDLER.store(h as *mut c_void, Ordering::Release);
@@ -219,12 +235,16 @@ unsafe extern "system" fn add_vectored_exception_handler(_first: u32, handler: O
 }
 
 /// Windows Server 2003: nothing to reserve on NT 4.0; std only needs it to succeed.
+// mrustc calls an import by its name (rustc goes through __imp_SetThreadStackGuarantee)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "SetThreadStackGuarantee")]
 unsafe extern "system" fn set_thread_stack_guarantee(_size: *mut u32) -> BOOL {
     1
 }
 
 /// Windows Vista: std asks for a high-resolution timer and sleeps with `Sleep` without
 /// one.
+// mrustc calls an import by its name (rustc goes through __imp_CreateWaitableTimerExW)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "CreateWaitableTimerExW")]
 unsafe extern "system" fn create_waitable_timer_ex_w(
     _sa: *mut c_void,
     _name: *const u16,

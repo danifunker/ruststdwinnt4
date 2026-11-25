@@ -1,0 +1,14 @@
+#!/bin/sh
+# mrustc for minicargo (which wants it named mrustc): a crate for the target (--target given)
+# stops at C, `-C emit-build-command`, since Visual C++ runs later in tenox7/ntsdk; build
+# scripts (no --target) are built for the host as usual. The real one is $MRUSTC_REAL.
+out= prev= tgt=
+for a; do
+    [ "$prev" = "-o" ] && out=$a
+    [ "$prev" = "--target" ] && tgt=1
+    prev=$a
+done
+if [ -n "$tgt" ] && [ -n "$out" ]; then
+    exec "$MRUSTC_REAL" "$@" -C emit-build-command="$out.cmd"
+fi
+exec "$MRUSTC_REAL" "$@"

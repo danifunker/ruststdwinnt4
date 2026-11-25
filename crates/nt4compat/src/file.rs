@@ -21,6 +21,8 @@ const NO_ERROR: u32 = 0;
 const INVALID_SET_FILE_POINTER: u32 = 0xFFFF_FFFF;
 
 /// Windows 2000: a 64-bit `SetFilePointer`.
+// mrustc calls an import by its name (rustc goes through __imp_SetFilePointerEx)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "SetFilePointerEx")]
 unsafe extern "system" fn set_file_pointer_ex(h: HANDLE, distance: i64, new: *mut i64, method: u32) -> BOOL {
     let mut high = (distance >> 32) as i32;
     // SAFETY: plain calls; new is the caller's, or null.
@@ -38,6 +40,8 @@ unsafe extern "system" fn set_file_pointer_ex(h: HANDLE, distance: i64, new: *mu
 }
 
 /// Windows 2000: a 64-bit `GetFileSize`.
+// mrustc calls an import by its name (rustc goes through __imp_GetFileSizeEx)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "GetFileSizeEx")]
 unsafe extern "system" fn get_file_size_ex(h: HANDLE, size: *mut i64) -> BOOL {
     let mut high = 0u32;
     // SAFETY: plain calls; size is the caller's.
@@ -85,6 +89,8 @@ unsafe fn query(h: HANDLE, info: *mut c_void, size: u32, class: u32) -> BOOL {
 }
 
 /// Windows Vista: the information classes std asks for.
+// mrustc calls an import by its name (rustc goes through __imp_GetFileInformationByHandleEx)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "GetFileInformationByHandleEx")]
 unsafe extern "system" fn get_file_information_by_handle_ex(
     h: HANDLE,
     class: i32,
@@ -188,6 +194,8 @@ const ERROR_NOT_SUPPORTED: u32 = 50;
 /// Windows Vista: the classes NT 4.0's native API has. Those of later Windows (POSIX
 /// delete and rename, FileDispositionInfoEx and FileRenameInfoEx) fail with
 /// ERROR_INVALID_PARAMETER, on which std falls back to the older ones.
+// mrustc calls an import by its name (rustc goes through __imp_SetFileInformationByHandle)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "SetFileInformationByHandle")]
 unsafe extern "system" fn set_file_information_by_handle(
     h: HANDLE,
     class: i32,
@@ -235,6 +243,8 @@ const VOLUME_NAME_NONE: u32 = 4;
 /// `\\?\UNC\` for the network redirector. `VOLUME_NAME_NT` gives the object name, and
 /// `VOLUME_NAME_NONE` the path on the volume; a GUID volume name (Windows 2000) is not
 /// supported.
+// mrustc calls an import by its name (rustc goes through __imp_GetFinalPathNameByHandleW)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "GetFinalPathNameByHandleW")]
 unsafe extern "system" fn get_final_path_name_by_handle_w(h: HANDLE, out: *mut u16, out_len: u32, flags: u32) -> u32 {
     // OBJECT_NAME_INFORMATION: a UNICODE_STRING, then its characters.
     let mut buf = [0u64; 1100 / 8 * 2];
@@ -322,6 +332,8 @@ fn starts_with_ci(s: &[u16], prefix: &[u16]) -> bool {
 
 /// NT 4.0 has hard links (on NTFS: FileLinkInformation), only not this function
 /// (Windows 2000).
+// mrustc calls an import by its name (rustc goes through __imp_CreateHardLinkW)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "CreateHardLinkW")]
 unsafe extern "system" fn create_hard_link_w(new: *const u16, existing: *const u16, _sa: *mut c_void) -> BOOL {
     const FILE_WRITE_ATTRIBUTES: u32 = 0x100;
     const SYNCHRONIZE: u32 = 0x10_0000;
@@ -367,6 +379,8 @@ unsafe extern "system" fn create_hard_link_w(new: *const u16, existing: *const u
 }
 
 /// Windows Vista; NT 4.0 has no symbolic links.
+// mrustc calls an import by its name (rustc goes through __imp_CreateSymbolicLinkW)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "CreateSymbolicLinkW")]
 unsafe extern "system" fn create_symbolic_link_w(_link: *const u16, _target: *const u16, _flags: u32) -> u8 {
     sys::fail(ERROR_NOT_SUPPORTED);
     0

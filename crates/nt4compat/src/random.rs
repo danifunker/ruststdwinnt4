@@ -256,6 +256,8 @@ fn reseed(s: &mut State) {
     s.requests = 0;
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_SystemFunction036)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "SystemFunction036")]
 unsafe extern "system" fn rtl_gen_random(buffer: *mut u8, length: u32) -> u8 {
     while LOCK.compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
         // SAFETY: plain call.

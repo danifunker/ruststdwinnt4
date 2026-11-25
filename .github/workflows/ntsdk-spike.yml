@@ -150,3 +150,49 @@ jobs:
           path: |
             out-alpha/*.log
             out-alpha/*.exe
+
+  # Alpha: std (std/1.90.0/nt4.patch, then tools/mrustc-nt4/std-edits.py) and examples/stdtest
+  # through mrustc (minicargo for std's crates) and Visual C++ 4.1, run with ntrun.
+  alpha-stdtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MRUSTC_REPO }}
+          ref: ${{ env.MRUSTC_REF }}
+          path: mrustc
+      - run: git -C mrustc apply "$PWD/tools/mrustc-nt4/mrustc.patch"
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            mrustc/bin/mrustc
+            mrustc/bin/minicargo
+          key: mrustc-minicargo-${{ env.MRUSTC_REF }}-${{ hashFiles('tools/mrustc-nt4/mrustc.patch') }}-ubuntu-24.04
+      - name: Build mrustc and minicargo
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zlib1g-dev
+          make -C mrustc -j"$(nproc)" bin/mrustc
+          make -C mrustc/tools/minicargo -j"$(nproc)"
+      - name: Rust 1.90's library sources
+        run: rustup toolchain install 1.90.0 --profile minimal --component rust-src
+      - name: std's source (patched, vendored)
+        run: |
+          export LIBRARY="$(rustc +1.90.0 --print sysroot)/lib/rustlib/src/rust/library"
+          export PATH="$(rustc +1.90.0 --print sysroot)/bin:$PATH"
+          tools/mrustc-nt4/mkstd.sh "$PWD/std-src"
+      - name: Translate std and stdtest (mrustc)
+        run: tools/mrustc-nt4/translate-std.sh alpha-nt4 "$PWD/std-src" out-std "$PWD/mrustc/bin/mrustc"
+      - run: docker pull tenox7/ntsdk
+      - name: Compile, link and run (Visual C++ 4.1, ntrun)
+        run: docker run --rm -v "$PWD":/src tenox7/ntsdk tools/mrustc-nt4/build-std.sh alpha out-std
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: alpha-stdtest
+          path: |
+            out-std/*.log
+            out-std/*.exe

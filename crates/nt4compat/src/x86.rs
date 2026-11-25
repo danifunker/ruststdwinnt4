@@ -8,6 +8,8 @@ provide! {
 /// The caller's registers in an x86 `CONTEXT` (`CONTEXT_CONTROL | CONTEXT_INTEGER`): as
 /// they will be when this returns to it. std calls it to start a backtrace.
 #[unsafe(naked)]
+// mrustc calls an import by its name (rustc goes through __imp_RtlCaptureContext)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "RtlCaptureContext")]
 unsafe extern "system" fn rtl_capture_context(_context: *mut u8) {
     core::arch::naked_asm!(
         "push eax",

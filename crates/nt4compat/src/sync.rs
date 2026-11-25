@@ -178,6 +178,8 @@ unsafe fn same(address: *const c_void, compare: *const c_void, size: usize) -> b
     }
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_WaitOnAddress)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "WaitOnAddress")]
 pub(crate) unsafe extern "system" fn wait_on_address(
     address: *const c_void,
     compare: *const c_void,
@@ -259,10 +261,14 @@ fn wake(address: *const c_void, all: bool) {
     }
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_WakeByAddressSingle)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "WakeByAddressSingle")]
 unsafe extern "system" fn wake_by_address_single(address: *const c_void) {
     wake(address, false)
 }
 
+// mrustc calls an import by its name (rustc goes through __imp_WakeByAddressAll)
+#[cfg_attr(rust_compiler = "mrustc", export_name = "WakeByAddressAll")]
 pub(crate) unsafe extern "system" fn wake_by_address_all(address: *const c_void) {
     wake(address, true)
 }

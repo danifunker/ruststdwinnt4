@@ -16,12 +16,17 @@
 //! for every other crate that imports them.
 #![no_std]
 #![allow(non_snake_case, clippy::missing_safety_doc)]
+// rust_compiler = "mrustc": set by mrustc, which builds this crate for Alpha, MIPS and PowerPC
+#![allow(unexpected_cfgs)]
 
 #[macro_use]
 mod imp;
 
 mod sys;
 
+// Not under mrustc (Alpha, MIPS, PowerPC): Microsoft's C run-time is linked there, and its
+// start-up code (which calls the C main mrustc writes) and TLS directory take this one's place.
+#[cfg(not(rust_compiler = "mrustc"))]
 pub mod crt;
 pub mod file;
 pub mod misc;
