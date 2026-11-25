@@ -1,0 +1,4 @@
+probe-out/
+out-*/
+*.log
+*.obj
