@@ -2,17 +2,18 @@
 //! Alpha, MIPS and PowerPC, see PLAN-mips-alpha-ppc.md), compiled only by mrustc:
 //!
 //! - mrustc has no `#![no_main]`: it needs the `start` lang item and writes a C `main` that
-//!   calls it. The process still starts in [`mainCRTStartup`](crate::start), which calls the
-//!   `__nt4rt_main` that [`entry!`](crate::entry) defines; this `start` is only there to be
-//!   referenced.
+//!   calls it, with the program's `main`. The C run-time's start-up calls that `main` (nt4rt's
+//!   own `mainCRTStartup` is left out here), so a program's `main` is reached the same way
+//!   [`entry!`](crate::entry) reaches it under rustc.
 //! - mrustc ignores `#[global_allocator]`: its allocator shims (`__rust_alloc`...) always call
 //!   std's default allocator, `__rdl_alloc` and the rest. A `no_std` program gets those here,
 //!   on [`NtHeap`].
+//! - `cbrt` and `fdim` (and the `f32` versions), which core calls and Visual C++ 4.1's C
+//!   library lacks.
 
 use core::alloc::{GlobalAlloc, Layout};
 
 use crate::heap::NtHeap;
-use crate::sys;
 
 #[lang = "start"]
 fn lang_start<T: crate::Termination + 'static>(
@@ -45,9 +46,40 @@ unsafe extern "C" fn __rdl_realloc(ptr: *mut u8, size: usize, align: usize, new_
     unsafe { NtHeap.realloc(ptr, Layout::from_size_align_unchecked(size, align), new_size) }
 }
 
+// (alloc defines __rdl_oom itself.)
+
+// What core calls in the C library that Visual C++ 4.1's lacks (C99's).
 #[no_mangle]
-extern "C" fn __rdl_oom(_size: usize, _align: usize) -> ! {
-    let _ = core::fmt::Write::write_str(&mut crate::console::stderr(), "memory allocation failed\r\n");
-    // SAFETY: ExitProcess takes any code and does not return.
-    unsafe { sys::ExitProcess(101) }
+extern "C" fn cbrt(x: f64) -> f64 {
+    if x == 0.0 || x != x || x == f64::INFINITY || x == f64::NEG_INFINITY {
+        return x;
+    }
+    // A first guess from the exponent (the bits divided by 3), then Newton's method.
+    let bits = x.abs().to_bits();
+    let mut y = f64::from_bits(bits / 3 + 0x2A9F_7893_782D_A1CE);
+    for _ in 0..6 {
+        y -= (y * y * y - x.abs()) / (3.0 * y * y);
+    }
+    if x < 0.0 { -y } else { y }
+}
+
+#[no_mangle]
+extern "C" fn cbrtf(x: f32) -> f32 {
+    cbrt(x as f64) as f32
+}
+
+#[no_mangle]
+extern "C" fn fdim(x: f64, y: f64) -> f64 {
+    if x != x || y != y {
+        x + y
+    } else if x > y {
+        x - y
+    } else {
+        0.0
+    }
+}
+
+#[no_mangle]
+extern "C" fn fdimf(x: f32, y: f32) -> f32 {
+    fdim(x as f64, y as f64) as f32
 }

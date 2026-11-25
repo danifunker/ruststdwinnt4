@@ -1,5 +1,74 @@
+diff --git a/src/macro_rules/eval.cpp b/src/macro_rules/eval.cpp
+index 60a59843..e7518304 100644
+--- a/src/macro_rules/eval.cpp
++++ b/src/macro_rules/eval.cpp
+@@ -600,11 +600,12 @@ InterpolatedFragment Macro_HandlePatternCap(TokenStream& lex, MacroPatEnt::Type
+         case TOK_FLOAT:
+         case TOK_STRING:
+         case TOK_BYTESTRING:
++        case TOK_CSTRING:
+         case TOK_RWORD_TRUE:
+         case TOK_RWORD_FALSE:
+             break;
+         default:
+-            throw ParseError::Unexpected(lex, tok, {TOK_INTEGER, TOK_FLOAT, TOK_STRING, TOK_BYTESTRING, TOK_RWORD_TRUE, TOK_RWORD_FALSE});
++            throw ParseError::Unexpected(lex, tok, {TOK_INTEGER, TOK_FLOAT, TOK_STRING, TOK_BYTESTRING, TOK_CSTRING, TOK_RWORD_TRUE, TOK_RWORD_FALSE});
+         }
+         return InterpolatedFragment( TokenTree(lex.get_edition(), lex.get_hygiene(), tok) );
+     }
+@@ -1134,6 +1135,7 @@ namespace
+                     continue;
+                 return true;
+             case TOK_BYTESTRING:
++            case TOK_CSTRING:
+             case TOK_STRING:
+             case TOK_INTEGER:
+             case TOK_FLOAT:
+@@ -1297,6 +1299,7 @@ namespace
+             case TOK_FLOAT:
+             case TOK_STRING:
+             case TOK_BYTESTRING:
++            case TOK_CSTRING:
+             case TOK_RWORD_TRUE:
+             case TOK_RWORD_FALSE:
+                 lex.consume();
+@@ -2001,6 +2004,7 @@ namespace
+             case TOK_FLOAT:
+             case TOK_STRING:
+             case TOK_BYTESTRING:
++            case TOK_CSTRING:
+             case TOK_RWORD_TRUE:
+             case TOK_RWORD_FALSE:
+                 lex.consume();
+diff --git a/src/macro_rules/mod.cpp b/src/macro_rules/mod.cpp
+index e5372c7d..68e72133 100644
+--- a/src/macro_rules/mod.cpp
++++ b/src/macro_rules/mod.cpp
+@@ -108,6 +108,7 @@ bool is_token_expr(eTokenType tt) {
+     case TOK_FLOAT:
+     case TOK_STRING:
+     case TOK_BYTESTRING:
++    case TOK_CSTRING:
+     case TOK_RWORD_TRUE:
+     case TOK_RWORD_FALSE:
+ 
+diff --git a/src/mir/optimise.cpp b/src/mir/optimise.cpp
+index 66c462ba..193bd4b1 100644
+--- a/src/mir/optimise.cpp
++++ b/src/mir/optimise.cpp
+@@ -3515,7 +3515,9 @@ bool MIR_Optimise_ConstPropagate(::MIR::TypeResolve& state, ::MIR::Function& fcn
+                     }
+                 TU_ARMA(Borrow, se) {
+                     // Shared borrows of statics can be better represented with the ItemAddr constant
+-                    if( se.type == HIR::BorrowType::Shared && se.val.m_wrappers.empty() && se.val.m_root.is_Static() )
++                    // - Not raw ones (`&raw const STATIC`): ItemAddr's type is a borrow, which a pointer-typed
++                    //   use (e.g. a call argument) then fails validation with.
++                    if( se.type == HIR::BorrowType::Shared && !se.is_raw && se.val.m_wrappers.empty() && se.val.m_root.is_Static() )
+                     {
+                         e->src = ::MIR::RValue::make_Constant( ::MIR::Constant::make_ItemAddr({ box$(se.val.m_root.as_Static()) }) );
+                         changed = true;
 diff --git a/src/trans/codegen_c.cpp b/src/trans/codegen_c.cpp
-index 6d076cc5..29c83991 100644
+index 6d076cc5..ff527143 100644
 --- a/src/trans/codegen_c.cpp
 +++ b/src/trans/codegen_c.cpp
 @@ -259,8 +259,16 @@ namespace {
@@ -31,7 +100,7 @@ index 6d076cc5..29c83991 100644
                  m_compiler = Compiler::Gcc;
                  if( Target_GetCurSpec().m_arch.m_pointer_bits < 64 && !m_options.emulated_i128 )
                  {
-@@ -316,6 +326,44 @@ namespace {
+@@ -316,6 +326,45 @@ namespace {
                      ;
                  break;
              case Compiler::Msvc:
@@ -43,6 +112,7 @@ index 6d076cc5..29c83991 100644
 +                    // The same goes for the C library's headers: the few functions the C code uses directly are declared here.
 +                    m_of
 +                        << "#define inline __inline\n"
++                        << "#ifndef va_copy\n#define va_copy(d, s) ((d) = (s))\n#endif\n"
 +                        << "void abort(void);\n"
 +                        << "void* memcpy(void*, const void*, size_t);\n"
 +                        << "void* memmove(void*, const void*, size_t);\n"
@@ -76,7 +146,7 @@ index 6d076cc5..29c83991 100644
                  m_of
                      << "#include <windows.h>\n"
                      << "#include <math.h>\n"  // fabsf, ...
-@@ -361,6 +409,12 @@ namespace {
+@@ -361,6 +410,12 @@ namespace {
                      ;
                  break;
              case Compiler::Msvc:
@@ -89,7 +159,7 @@ index 6d076cc5..29c83991 100644
                  m_of
                      << "__declspec(noreturn) static void _Unwind_Resume(void) { abort(); }\n"
                      << "#define ALIGNOF(t) __alignof(t)\n"
-@@ -400,12 +454,30 @@ namespace {
+@@ -400,12 +455,30 @@ namespace {
                  }
                  break;
              case Compiler::Msvc:
@@ -125,7 +195,7 @@ index 6d076cc5..29c83991 100644
                      << "static inline uint64_t __builtin_clz64(uint64_t v) {\n"
                      << "\treturn ( (v >> 32) != 0 ? __builtin_clz(v>>32) : 32 + __builtin_clz(v) );\n"
                      << "}\n"
-@@ -555,6 +627,63 @@ namespace {
+@@ -555,6 +628,90 @@ namespace {
                      << "\treturn __builtin_add_overflow_i" << Target_GetCurSpec().m_arch.m_pointer_bits << "(a, b, out);\n"
                      << "}\n"
                      << "static inline uint64_t __builtin_bswap64(uint64_t v) { return _byteswap_uint64(v); }\n"
@@ -138,8 +208,12 @@ index 6d076cc5..29c83991 100644
 +                    // `__mrustc_atomic_OPn` are what emit_msvc_atomic_op writes in this mode.
 +                    m_of
 +                        << "static uint32_t __mrustc_cas32(volatile void* p, uint32_t n, uint32_t o) { return (uint32_t)InterlockedCompareExchange((void**)p, (void*)n, (void*)o); }\n"
++                        // Loads go through the compare-exchange too, for its memory barrier (Alpha orders weakly)
 +                        << "static uint32_t __mrustc_atomic_load(volatile void* p, unsigned bits) {"
-+                        << " if(bits == 8) return *(volatile uint8_t*)p; if(bits == 16) return *(volatile uint16_t*)p; return __mrustc_cas32(p, 0, 0); }\n"
++                        << " uint32_t w;"
++                        << " if(bits == 32) return __mrustc_cas32(p, 0, 0);"
++                        << " w = __mrustc_cas32((volatile void*)((uintptr_t)p & ~(uintptr_t)3), 0, 0) >> ((unsigned)((uintptr_t)p & 3) * 8);"
++                        << " return bits == 8 ? (w & 0xFFu) : (w & 0xFFFFu); }\n"
 +                        // Compare-exchange: returns the old value (as InterlockedCompareExchange)
 +                        << "static uint32_t __mrustc_atomic_cas(volatile void* p, unsigned bits, uint32_t n, uint32_t o) {"
 +                        << " volatile uint32_t* w; unsigned sh; uint32_t mask, cur, want;"
@@ -163,6 +237,29 @@ index 6d076cc5..29c83991 100644
 +                        <<   " switch(op) { case 0: n = o + v; break; case 1: n = o & v; break; case 2: n = o | v; break; case 3: n = o ^ v; break; default: n = v; break; }"
 +                        <<   " if( __mrustc_atomic_cas(p, bits, n & mask, o) == o ) return o;"
 +                        << " }"
++                        << " }\n"
++                        ;
++                    // 64 bits: under one lock for the whole program (an uninitialised global is communal, so
++                    // all the object files share it); a 64-bit access on Alpha is one instruction.
++                    m_of
++                        << "volatile uint32_t __mrustc_atomic64_lock;\n"
++                        << "static void __mrustc_atomic64_enter(void) { while( __mrustc_cas32(&__mrustc_atomic64_lock, 1, 0) != 0 ) { } }\n"
++                        << "static void __mrustc_atomic64_leave(void) { __mrustc_cas32(&__mrustc_atomic64_lock, 0, 1); }\n"
++                        << "static uint64_t __mrustc_atomic_cas64(volatile void* p, uint64_t n, uint64_t o) {"
++                        << " uint64_t c; __mrustc_atomic64_enter(); c = *(volatile uint64_t*)p; if( c == o ) *(volatile uint64_t*)p = n; __mrustc_atomic64_leave(); return c; }\n"
++                        << "static uint64_t __mrustc_atomic_rmw64(volatile void* p, int op, uint64_t v) {"
++                        << " uint64_t o, n; __mrustc_atomic64_enter(); o = *(volatile uint64_t*)p;"
++                        << " switch(op) { case 0: n = o + v; break; case 1: n = o & v; break; case 2: n = o | v; break; case 3: n = o ^ v; break; case 5: n = o; break; default: n = v; break; }"
++                        << " *(volatile uint64_t*)p = n; __mrustc_atomic64_leave(); return o; }\n"
++                        << "#define __mrustc_atomic_InterlockedCompareExchange64(p, n, o) __mrustc_atomic_cas64((p), (uint64_t)(n), (uint64_t)(o))\n"
++                        << "#define __mrustc_atomic_InterlockedExchangeAdd64(p, v) __mrustc_atomic_rmw64((p), 0, (uint64_t)(v))\n"
++                        << "#define __mrustc_atomic_InterlockedAnd64(p, v) __mrustc_atomic_rmw64((p), 1, (uint64_t)(v))\n"
++                        << "#define __mrustc_atomic_InterlockedOr64(p, v) __mrustc_atomic_rmw64((p), 2, (uint64_t)(v))\n"
++                        << "#define __mrustc_atomic_InterlockedXor64(p, v) __mrustc_atomic_rmw64((p), 3, (uint64_t)(v))\n"
++                        << "#define __mrustc_atomic_InterlockedExchange64(p, v) __mrustc_atomic_rmw64((p), 4, (uint64_t)(v))\n"
++                        << "static uint64_t __mrustc_atomicloop64(volatile uint64_t* slot, uint64_t param, uint64_t (*cb)(uint64_t, uint64_t)) {"
++                        << " uint64_t v;"
++                        << " for(;;) { v = __mrustc_atomic_rmw64(slot, 5, 0); if( __mrustc_atomic_cas64(slot, cb(v, param), v) == v ) return v; }"
 +                        << " }\n"
 +                        ;
 +                    for(int sz = 8; sz <= 32; sz *= 2)
@@ -189,7 +286,7 @@ index 6d076cc5..29c83991 100644
                      << "#define InterlockedCompareExchange8Acquire _InterlockedCompareExchange8\n"
                      << "#define InterlockedCompareExchange8Release _InterlockedCompareExchange8\n"
                      << "#define InterlockedCompareExchange8NoFence _InterlockedCompareExchange8\n"
-@@ -629,25 +758,25 @@ namespace {
+@@ -629,25 +786,25 @@ namespace {
                      << "static inline uint128_t shl128(uint128_t a, uint32_t b);\n"
                      << "static inline uint128_t shr128(uint128_t a, uint32_t b);\n"
                      << "static inline float make_float(int is_neg, int exp, uint32_t mantissa_bits) { float rv; uint32_t vi=(mantissa_bits&((1<<23)-1))|((exp+127)<<23);if(is_neg)vi|=1<<31; memcpy(&rv, &vi, 4); return rv; }\n"
@@ -220,7 +317,7 @@ index 6d076cc5..29c83991 100644
                      << " uint128_t y = shl128(v, n);"
                      << " uint64_t a = (y.hi >> ((128-(52+1))-64));"
                      << " uint64_t b = shr128(y, (64-(52+1))).lo | (y.lo & 0x7FF);"
-@@ -666,9 +795,11 @@ namespace {
+@@ -666,9 +823,11 @@ namespace {
                      // Serial shift+add
                      << "static inline bool mul128_o(uint128_t a, uint128_t b, uint128_t* o) {"
                      << " bool of = false;"
@@ -234,7 +331,7 @@ index 6d076cc5..29c83991 100644
                      <<  " if(a.hi==0&&a.lo<m)   break;"
                      <<  " if(i>=64&&a.hi<m) break;"
                      <<  " if( m & (i >= 64 ? a.hi : a.lo) ) of |= add128_o(*o, b, o);"
-@@ -679,16 +810,17 @@ namespace {
+@@ -679,16 +838,17 @@ namespace {
                      << "}\n"
                      // Long division
                      << "static inline bool div128_o(uint128_t a, uint128_t b, uint128_t* q, uint128_t* r) {"
@@ -255,7 +352,7 @@ index 6d076cc5..29c83991 100644
                      << " shift ++;"
                      << " if(q) { q->hi = 0; q->lo = 0; }"
                      << " while(shift--) {"
-@@ -734,24 +866,26 @@ namespace {
+@@ -734,24 +894,26 @@ namespace {
                      << " }\n"
                      << "static inline int cmp128s(int128_t a, int128_t b) { if(a.hi != b.hi) return (int64_t)a.hi < (int64_t)b.hi ? -1 : 1; if(a.lo != b.lo) return a.lo < b.lo ? -1 : 1; return 0; }\n"
                      // Returns true if overflow happens (if negative with pos,pos or positive with neg,neg)
@@ -288,7 +385,7 @@ index 6d076cc5..29c83991 100644
                      << " if(sgna != sgnb && q) *q = neg128s(*q);"
                      << " if(sgna && r) *r = neg128s(*r);"    // Remainder has the same sign as the dividend (a)
                      << " return rv;"
-@@ -813,7 +947,8 @@ namespace {
+@@ -813,7 +975,8 @@ namespace {
                  << "\n"
                  // A linear (fast-fail) search of a list of strings
                  << "static inline size_t mrustc_string_search_linear(SLICE_PTR val, size_t count, SLICE_PTR* options) {\n"
@@ -298,7 +395,7 @@ index 6d076cc5..29c83991 100644
                  << "\t\tint cmp = slice_cmp(val, options[i]);\n"
                  << "\t\tif(cmp < 0) break;\n"
                  << "\t\tif(cmp == 0) return i;\n"
-@@ -934,7 +1069,7 @@ namespace {
+@@ -934,7 +1097,7 @@ namespace {
                                      out.push_back("uintptr_t");
                                      break;
                                  case AllocatorDataTy::Ptr:    // *mut u8
@@ -307,7 +404,7 @@ index 6d076cc5..29c83991 100644
                                      break;
                                  case AllocatorDataTy::Usize:
                                      out.push_back("uintptr_t");
-@@ -947,7 +1082,7 @@ namespace {
+@@ -947,7 +1110,7 @@ namespace {
                                  case AllocatorDataTy::Unit:
                                      return "void";
                                  case AllocatorDataTy::ResultPtr:  // (..., *mut i8) + *mut u8
@@ -316,7 +413,7 @@ index 6d076cc5..29c83991 100644
                                  // - Args
                                  case AllocatorDataTy::Layout: // usize, usize
                                  case AllocatorDataTy::Ptr:    // *mut u8
-@@ -1015,7 +1150,8 @@ namespace {
+@@ -1015,7 +1178,8 @@ namespace {
                              // Force abort on alloc error, rustc uses `-Zoom={panic,abort}` to select this
                              m_of << "uint8_t __rust_alloc_error_handler_should_panic_v2() { return 0; }";
                          }
@@ -326,7 +423,7 @@ index 6d076cc5..29c83991 100644
                          if(oom_method == HIR::SimplePath()) {
                              m_of << "\tvoid __rdl_oom(uintptr_t, uintptr_t);\n";
                              m_of << "\t__rdl_oom(s,a);\n";
-@@ -1028,6 +1164,8 @@ namespace {
+@@ -1028,6 +1192,8 @@ namespace {
                              m_of << "\tvoid __rg_oom(uintptr_t, uintptr_t);\n";
                              m_of << "\t__rg_oom(s,a);\n";
                          }
@@ -335,7 +432,7 @@ index 6d076cc5..29c83991 100644
                          m_of << "}\n";
                      }
                      else
-@@ -1689,7 +1827,11 @@ namespace {
+@@ -1689,7 +1855,11 @@ namespace {
                  m_of << "tTYPEID __typeid_" << Trans_Mangle(ty) << " __attribute__((weak));\n";
                  break;
              case Compiler::Msvc:
@@ -348,7 +445,7 @@ index 6d076cc5..29c83991 100644
                  break;
              }
          }
-@@ -1869,7 +2011,9 @@ namespace {
+@@ -1869,7 +2039,9 @@ namespace {
                  switch(m_compiler)
                  {
                  case Compiler::Msvc:
@@ -359,7 +456,7 @@ index 6d076cc5..29c83991 100644
                      break;
                  case Compiler::Gcc:
                      break;
-@@ -1913,6 +2057,11 @@ namespace {
+@@ -1913,6 +2085,11 @@ namespace {
                      {
                          field_align = 4;
                      }
@@ -371,7 +468,7 @@ index 6d076cc5..29c83991 100644
                      a = packing_max_align > 0 ? std::min<size_t>(packing_max_align, field_align) : field_align;
                      DEBUG("a = " << a);
                      while(cur_ofs % a != 0)
-@@ -1966,6 +2115,11 @@ namespace {
+@@ -1966,6 +2143,11 @@ namespace {
              {
                  m_of << "\tchar _d;\n";
              }
@@ -383,7 +480,7 @@ index 6d076cc5..29c83991 100644
              m_of << "}";
              if(has_manual_align)
              {
-@@ -2053,7 +2207,8 @@ namespace {
+@@ -2053,7 +2235,8 @@ namespace {
                      switch(m_compiler)
                      {
                      case Compiler::Msvc:
@@ -393,7 +490,7 @@ index 6d076cc5..29c83991 100644
                          break;
                      case Compiler::Gcc:
                          break;
-@@ -2129,7 +2284,9 @@ namespace {
+@@ -2129,7 +2312,9 @@ namespace {
                  // TODO: Handle unsized (should check the size of the fixed-size region)
                  m_of << "typedef char sizeof_assert_" << Trans_Mangle(p) << "[ (sizeof(struct s_" << Trans_Mangle(p) << ") == " << repr->size << ") ? 1 : -1 ];\n";
              }
@@ -404,7 +501,7 @@ index 6d076cc5..29c83991 100644
  
              m_mir_res = nullptr;
          }
-@@ -2468,13 +2625,20 @@ namespace {
+@@ -2468,13 +2653,20 @@ namespace {
              bool rv = ( align * 8 >= Target_GetCurSpec().m_arch.m_pointer_bits );
              m_of << "union u_static_" << Trans_Mangle(p);
              if(is_proto) {
@@ -426,7 +523,7 @@ index 6d076cc5..29c83991 100644
                  m_of << " }";
              }
              m_of << " " << Trans_Mangle(p);
-@@ -2510,7 +2674,7 @@ namespace {
+@@ -2510,7 +2702,7 @@ namespace {
                  m_of << linkage_name << "[0];\n";
  
                  emit_static_ty(type, p, /*is_proto=*/true);
@@ -435,7 +532,7 @@ index 6d076cc5..29c83991 100644
                  m_of << "\t// static " << p << " : " << type;
                  m_of << "\n";
                  return;
-@@ -2524,7 +2688,10 @@ namespace {
+@@ -2524,7 +2716,10 @@ namespace {
                      // Handled with asm() later
                      break;
                  case Compiler::Msvc:
@@ -447,17 +544,18 @@ index 6d076cc5..29c83991 100644
                      break;
                  //case Compiler::Std11:
                  //    m_of << "#define " << Trans_Mangle(p) << " " << linkage_name << "\n";
-@@ -2568,7 +2735,8 @@ namespace {
+@@ -2568,7 +2763,9 @@ namespace {
                      m_of << "__attribute__((weak)) ";
                      break;
                  case Compiler::Msvc:
 -                    m_of << "__declspec(selectany) ";
-+                    if( !m_options.c89 )
-+                        m_of << "__declspec(selectany) ";
++                    // C89 (no selectany): a weak static (vtables...) is emitted by every crate that
++                    // uses it, so each object file can have its own copy.
++                    m_of << (m_options.c89 ? "static " : "__declspec(selectany) ");
                      break;
                  }
                  break;
-@@ -2579,7 +2747,8 @@ namespace {
+@@ -2579,7 +2776,8 @@ namespace {
                      m_of << "__attribute__((weak_import)) ";
                      break;
                  case Compiler::Msvc:
@@ -467,7 +565,22 @@ index 6d076cc5..29c83991 100644
                      break;
                  }
                  break;
-@@ -2624,7 +2793,7 @@ namespace {
+@@ -2597,7 +2795,7 @@ namespace {
+                     break;
+                 }
+             }
+-            if( item.m_params.is_generic() ) {
++            if( item.m_params.is_generic() && !(m_options.c89 && item.m_linkage.type == HIR::Linkage::Type::Weak) ) {
+                 m_of << "static ";
+             }
+             emit_static_ty(type, p, /*is_proto=*/true);
+@@ -2621,10 +2819,13 @@ namespace {
+                 if( item.m_params.is_generic() ) {
+                     m_of << "static ";
+                 }
++                else if( m_options.c89 && item.m_linkage.type == HIR::Linkage::Type::Weak ) {
++                    m_of << "static ";  // see emit_static_proto
++                }
                  bool is_packed = emit_static_ty(type, p, /*is_proto=*/false);
                  m_of << " = ";
  
@@ -476,7 +589,7 @@ index 6d076cc5..29c83991 100644
                  if( is_packed ) {
                      DEBUG("encoded.bytes = `" << FMT_CB(ss, for(auto& b: encoded.bytes) ss << std::setw(2) << std::setfill('0') << std::hex << unsigned(b) << (int(&b - encoded.bytes.data()) % 8 == 7 ? " " : "");) << "`");
                      DEBUG("encoded.relocations = " << encoded.relocations);
-@@ -2672,7 +2841,7 @@ namespace {
+@@ -2672,7 +2873,7 @@ namespace {
                              ++ reloc_it;
                          }
                          else {
@@ -485,7 +598,7 @@ index 6d076cc5..29c83991 100644
                          }
                      }
                  }
-@@ -2916,6 +3085,12 @@ namespace {
+@@ -2916,6 +3117,12 @@ namespace {
                  m_mir_res = nullptr;
                  return ;
              }
@@ -498,7 +611,7 @@ index 6d076cc5..29c83991 100644
              else if( item.m_linkage.name != "" && m_compiler == Compiler::Msvc )
              {
                  m_of << "#pragma comment(linker, \"/alternatename:" << Trans_Mangle(p) << "=" << item.m_linkage.name << "\")\n";
-@@ -2967,7 +3142,7 @@ namespace {
+@@ -2967,7 +3174,7 @@ namespace {
              m_of << "// PROTO extern \"" << item.m_abi << "\" " << p << "\n";
              if( item.m_linkage.name != "" )
              {
@@ -507,7 +620,7 @@ index 6d076cc5..29c83991 100644
                  {
                      // If this function is implementing an external ABI, just rename it (don't bother with per-compiler trickery).
                      m_of << "#pragma comment(linker, \"/alternatename:" << item.m_linkage.name << "=" << Trans_Mangle(p) << "\")\n";
-@@ -3907,8 +4082,9 @@ namespace {
+@@ -3907,8 +4114,9 @@ namespace {
                          emit_lvalue(e.dst); m_of << ".DATA[2] = "; emit_param(ve.val);
                      }
                      else {
@@ -519,7 +632,7 @@ index 6d076cc5..29c83991 100644
                      }
                      }
                  TU_ARMA(Borrow, ve) {
-@@ -3982,10 +4158,11 @@ namespace {
+@@ -3982,10 +4190,11 @@ namespace {
                          break;
                      }
                      else if( ve.op == ::MIR::eBinOp::MOD && (ty == ::HIR::CoreType::F32 || ty == ::HIR::CoreType::F64) ) {
@@ -533,7 +646,7 @@ index 6d076cc5..29c83991 100644
                          m_of << "("; emit_param(ve.val_l); m_of << ", "; emit_param(ve.val_r); m_of << ")";
                          break;
                      }
-@@ -4661,11 +4838,11 @@ namespace {
+@@ -4661,11 +4870,11 @@ namespace {
                      // Handle signed values
                      if( is_signed ) {
                          m_of << static_cast<int64_t>(e.values[odd_arm]);
@@ -547,7 +660,7 @@ index 6d076cc5..29c83991 100644
                      }
                      m_of << ") {"; cb(odd_arm); m_of << "} else {"; cb(odd_arm == 0 ? 1 : 0); m_of << "}\n";
                      return ;
-@@ -4681,10 +4858,10 @@ namespace {
+@@ -4681,10 +4890,10 @@ namespace {
                  {
                      // Handle signed values
                      if( is_signed ) {
@@ -560,7 +673,7 @@ index 6d076cc5..29c83991 100644
                      }
                      cb(j);
                      m_of << "break;\n";
-@@ -4751,7 +4928,7 @@ namespace {
+@@ -4751,7 +4960,7 @@ namespace {
                  m_of << ") {\n";
                  for(size_t i = 0; i < ve->size(); i++)
                  {
@@ -569,7 +682,7 @@ index 6d076cc5..29c83991 100644
                  }
                  m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
                  m_of << indent << "}\n";
-@@ -4769,7 +4946,7 @@ namespace {
+@@ -4769,7 +4978,7 @@ namespace {
                      if( (*ve)[i] == INT64_MIN )
                          m_of << "INT64_MIN";
                      else
@@ -578,7 +691,7 @@ index 6d076cc5..29c83991 100644
                      m_of << ": "; cb(i); m_of << " break;\n";
                  }
                  m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
-@@ -6118,6 +6295,14 @@ namespace {
+@@ -6118,6 +6327,14 @@ namespace {
                  if(ty.data().is_Pointer()) {
                      m_of << "("; emit_ctype(ty); m_of << ")";
                  }
@@ -593,7 +706,7 @@ index 6d076cc5..29c83991 100644
                  m_of << name;
                  switch( get_prim_size(params.m_types.at(0)) )
                  {
-@@ -6299,23 +6484,40 @@ namespace {
+@@ -6299,23 +6516,40 @@ namespace {
              else if( name == "min_align_of_val" || name == "align_of_val" ) {
                  emit_lvalue(e.ret_val); m_of << " = ";
                  const auto& ty = params.m_types.at(0);
@@ -638,7 +751,7 @@ index 6d076cc5..29c83991 100644
                      }
                      else {
                          m_of << "1";
-@@ -6323,7 +6525,7 @@ namespace {
+@@ -6323,7 +6557,7 @@ namespace {
                  }
                  else if( inner_ty.data().is_TraitObject() ) {
                      if( ! ty.data().is_TraitObject() ) {
@@ -647,7 +760,7 @@ index 6d076cc5..29c83991 100644
                      }
                      m_of << "((VTABLE_HDR*)"; emit_param(e.args.at(0)); m_of << ".META)->align";
                      if( ! ty.data().is_TraitObject() ) {
-@@ -6611,7 +6813,8 @@ namespace {
+@@ -6611,7 +6845,8 @@ namespace {
              else if( name == "caller_location" ) {
                  //m_of << "abort()";
                  auto p = m_crate.get_lang_item_path_opt("panic_location");
@@ -657,7 +770,7 @@ index 6d076cc5..29c83991 100644
                  if( p == HIR::SimplePath() ) {
                      m_of << "s_ZRG2cE9core0_0_05panic8Location0g";
                  }
-@@ -6620,7 +6823,7 @@ namespace {
+@@ -6620,7 +6855,7 @@ namespace {
                  }
                  m_of << " mrustc_empty_caller_location = {0,0,{\"\",0}};";
                  //m_of << " mrustc_empty_caller_location = {{\"\",0},0,0};";  // NOTE: Depends on the generated layout :(
@@ -666,7 +779,7 @@ index 6d076cc5..29c83991 100644
              }
              // --- Pointer manipulation
              else if( name == "offset" ) {   // addition, with the reqirement that the resultant pointer be in bounds
-@@ -6938,12 +7141,12 @@ namespace {
+@@ -6938,12 +7173,12 @@ namespace {
                          m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
                          break;
                      case ::HIR::CoreType::I64:
@@ -681,7 +794,7 @@ index 6d076cc5..29c83991 100644
                          }
                          else
                          {
-@@ -7023,12 +7226,12 @@ namespace {
+@@ -7023,12 +7258,12 @@ namespace {
                          m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
                          break;
                      case ::HIR::CoreType::I64:
@@ -696,7 +809,7 @@ index 6d076cc5..29c83991 100644
                          }
                          else
                          {
-@@ -7902,7 +8105,7 @@ namespace {
+@@ -7902,7 +8137,7 @@ namespace {
  
                  else {
                      // TODO: Platform intrinsics
@@ -705,7 +818,7 @@ index 6d076cc5..29c83991 100644
                  }
              }
              else {
-@@ -8064,7 +8267,7 @@ namespace {
+@@ -8064,7 +8299,7 @@ namespace {
              case ::HIR::CoreType::I32:
              case ::HIR::CoreType::I64:
              case ::HIR::CoreType::Isize:
@@ -714,7 +827,7 @@ index 6d076cc5..29c83991 100644
                  break;
              case ::HIR::CoreType::Bool:
              case ::HIR::CoreType::U8:
-@@ -8073,7 +8276,7 @@ namespace {
+@@ -8073,7 +8308,7 @@ namespace {
              case ::HIR::CoreType::U64:
              case ::HIR::CoreType::Usize:
              case ::HIR::CoreType::Char:
@@ -723,7 +836,7 @@ index 6d076cc5..29c83991 100644
                  break;
              case ::HIR::CoreType::I128: // TODO: Emulation
              case ::HIR::CoreType::U128: // TODO: Emulation
-@@ -8253,19 +8456,19 @@ namespace {
+@@ -8253,19 +8488,19 @@ namespace {
                      }
                      else {
                          m_of << c.v.truncate_i64();
@@ -746,7 +859,7 @@ index 6d076cc5..29c83991 100644
                      }
                      else
                      {
-@@ -8291,17 +8494,17 @@ namespace {
+@@ -8291,17 +8526,17 @@ namespace {
                      break;
                  case ::HIR::CoreType::U64:
                  case ::HIR::CoreType::Usize:

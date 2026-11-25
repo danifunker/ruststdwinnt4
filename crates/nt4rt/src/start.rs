@@ -39,12 +39,18 @@ impl<E: core::fmt::Debug> Termination for Result<(), E> {
     }
 }
 
+#[cfg(not(rust_compiler = "mrustc"))]
 extern "Rust" {
     /// Defined by [`entry!`](crate::entry) in the program.
     fn __nt4rt_main() -> u32;
 }
 
 /// The entry point the linker gives a console program.
+///
+/// Not under mrustc: there the C run-time's start-up calls the C `main` mrustc writes, which
+/// calls the `start` lang item (mrustc.rs) with the program's `main`; mrustc doesn't keep an
+/// unreferenced `#[no_mangle]` function such as `__nt4rt_main` anyway.
+#[cfg(not(rust_compiler = "mrustc"))]
 #[no_mangle]
 pub unsafe extern "C" fn mainCRTStartup() -> ! {
     // SAFETY: the program defines __nt4rt_main with entry!; ExitProcess does not return.
