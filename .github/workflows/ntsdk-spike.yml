@@ -30,6 +30,17 @@ jobs:
               fi
             done
             exit $rc'
+      - name: NaN on Alpha, by compiler flag
+        if: always()
+        run: |
+          docker run --rm -v "$PWD":/src tenox7/ntsdk sh -c '
+            cd tools/ntsdk-spike/probes
+            for f in "" -QAieee -QAieee1 -QAieee2 -QAieee3 -QAieee0; do
+              echo "== cl $f"
+              ntsdk nt40 alpha cl -nologo $f -Fenan.exe nan.c > cl.log 2>&1 || { head -3 cl.log; continue; }
+              grep -i "warning\|ignor" cl.log | head -2
+              ntsdk nt40 alpha ntrun nan.exe 2>&1 | tail -4
+            done'
       - name: Probes
         if: always()
         run: docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/probe.sh
