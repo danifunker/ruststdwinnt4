@@ -33,9 +33,15 @@ for dll in ntdll userenv; do
 done
 # ntrun has no sockets (no WS2_32.DLL) and no USERENV.DLL: stand-ins next to the programs,
 # for these runs
+# and ntrun-shims.c: functions std calls that ntrun lacks (NtWriteFile...), ahead of the
+# import libraries, for these runs only
+cp "$here/ntrun-stubs/ntrun-shims.c" "$d/ntrun-shims-$cpu.c"
+( cd "$d" && ntsdk nt40 "$cpu" cl -nologo -c -W1 -Fontrun-shims-$cpu.obj ntrun-shims-$cpu.c ) > "$d/ntrun-shims-$cpu.log" 2>&1 \
+    || { cat "$d/ntrun-shims-$cpu.log"; exit 1; }
+dlldir=$(win "$d")
 link_run() { # link_run NAME
     start=$(date +%s)
-    ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:$1-$cpu.exe -subsystem:console $1.exe-$cpu.obj $objs \
+    ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:$1-$cpu.exe -subsystem:console $1.exe-$cpu.obj ntrun-shims-$cpu.obj $objs \
         kernel32.lib advapi32.lib ws2_32.lib userenv-$cpu.lib ntdll-$cpu.lib ) > "$d/link-$1-$cpu.log" 2>&1
     s=$?
     echo "link $1 ($cpu): exit $s, $(( $(date +%s) - start )) s, $(wc -c < "$d/$1-$cpu.exe" 2>/dev/null || echo no) bytes"
@@ -44,7 +50,7 @@ link_run() { # link_run NAME
     for dll in ws2_32 userenv; do
         [ -f "$d/$dll.dll" ] || "$here/ntrun-stubs/mkstub.sh" "$cpu" "$d/$1-$cpu.exe" "$d" $dll || return 1
     done
-    ( cd "$d" && ntsdk nt40 "$cpu" sh -c 'NTRUN_DLLPATH="$1;$NTRUN_DLLPATH" exec ntrun $2-$3.exe' sh "$(win "$d")" "$1" "$cpu" ) 2>&1 \
+    ( cd "$d" && ntsdk nt40 "$cpu" sh -c 'NTRUN_DLLPATH="$1;$NTRUN_DLLPATH" exec ntrun $2-$3.exe' sh "$dlldir" "$1" "$cpu" ) 2>&1 \
         | tee "$d/run-$1-$cpu.log"
 }
 link_run stdsmoke || exit 1
