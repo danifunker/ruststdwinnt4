@@ -1,8 +1,9 @@
-# Plan: MIPS, Alpha and PowerPC (parked)
+# Plan: MIPS, Alpha and PowerPC
 
-Status: **parked**. PINT (ARM) and x86 are done. A feasibility spike ran on 2026-11-25
-(see "Spike, 2026-11-25" below): ntsdk builds and runs C on all three CPUs, and mrustc's C
-is a few known changes away from what Visual C++ 4.1 takes.
+Status: **Alpha first, in progress** (branch `alpha`; mrustc's fork, branch `alpha-nt4`).
+PINT (ARM) and x86 are done. Rust runs natively on Windows NT 4.0 for Alpha: `hello`
+through mrustc's new C89 mode and Visual C++ 4.1 runs under `ntrun` (see "Alpha,
+2026-11-25" below). MIPS and PowerPC follow on the same path.
 
 - 2026-11-08: plan written for Alpha and PowerPC.
 - 2026-11-25: `tenox7/ntsdk` appeared and changes the toolchain side: Microsoft's own C
@@ -12,6 +13,8 @@ is a few known changes away from what Visual C++ 4.1 takes.
 - 2026-11-25: spike: ntsdk's `hello.c` passes on MIPS, Alpha and PowerPC; mrustc's C for
   core, alloc, nt4rt and hello measured against Visual C++ 4.1; the C89 mode is about
   3 to 5 weeks.
+- 2026-11-25: Alpha first (the user's priority), the minimum it needs rather than the full
+  C89 mode: hello runs on Alpha the same day; std and stdtest translate (see below).
 
 ## Shape
 
@@ -21,8 +24,10 @@ is a few known changes away from what Visual C++ 4.1 takes.
 2. **The MIPS shortcut** (rustc's `mipsel` objects converted to COFF) is optional. It is
    worth taking only if it is cheap and proves out before the mrustc work is done, or if
    mrustc's output is too slow or too big for Visual C++ 4.1 on MIPS.
-3. **Order of CPUs** once mrustc works: PowerPC or MIPS first (32-bit, simplest), Alpha
-   last (32-bit pointers in 64-bit registers, the most unusual ABI).
+3. **Alpha first**, then MIPS and PowerPC. Alpha's 32-bit pointers make it a 32-bit target
+   for the C, which is the same as MIPS's byte for byte; the CPU-specific part is small
+   (import libraries, the C run-time, a target file). PowerPC needs its arch name kept away
+   from core's AltiVec module.
 
 ## Why not the ARM and x86 way
 
@@ -239,6 +244,70 @@ take AI-written code (its CONTRIBUTING.md), so all of this stays in the user's f
 - ntsdk's `axp64` (Platform SDK for Windows 2000 RC2) has `cl` 13.00 for Alpha. Without
   `-Ap64` it makes 32-bit code, but that SDK has no 32-bit libraries. A possible newer
   Alpha compiler if 4.1 proves too weak; Visual C++ 6 for Alpha on the NAS is the other.
+
+## Alpha, 2026-11-25
+
+Branch `alpha` here, `alpha-nt4` in mrustc's fork (based on its `master`, eb5df108). Until
+the fork's branch is pushed, CI applies `tools/mrustc-nt4/mrustc.patch` (that branch's
+diff) to the fork's `master`. The workflow (`.github/workflows/ntsdk-spike.yml`) has two
+jobs: `alpha-hello` and `alpha-stdtest`.
+
+### What it took in mrustc (the C89 mode)
+
+`backend.c.c89 = true` in a target file (with `variant = "msvc"`): C for Visual C++ 4.x.
+Not the full mode the spike estimated (3 to 5 weeks), the parts Alpha needed:
+
+- The prelude: `__inline` (by a define), the C89 doubles maths and the C99 ones on top
+  (`__mrustc_trunc`, `__mrustc_sqrtf`...), plain-C popcount/ctz/clz/byte swaps, `INFINITY`
+  and `NAN`, `va_copy`; no `intrin.h`, `windows.h` or C library headers: extern functions are
+  declared under their own names (no `/alternatename`), which the headers' prototypes would
+  clash with.
+- `i64`/`ui64` literals; statics initialized by position (`raw` first in their union).
+- No `__alignof`, `__declspec(align|noreturn|selectany)`. Alignment over 8 is capped at 8:
+  explicit padding keeps the sizes mrustc computed (`SliceArcInnerForStatic` is 16), and a
+  zero-length `uint64_t` array gives such a struct the C alignment the padding assumes.
+  Weak statics (vtables) are `static` in each object file; typeids are communal.
+- Atomics on NT 4.0's only one, kernel32's 32-bit `InterlockedCompareExchange`:
+  compare-exchange loops, 8 and 16 bits on the aligned word, 64 bits under one lock.
+- Float-to-integer `as` saturates through helpers: Alpha's conversion traps out of range
+  (`hello` stopped with c0000090 on `1e19 as u64` before).
+- No passing of 8-aligned arguments by pointer (an MSVC x86 workaround that broke the C ABI
+  of `extern "C"` functions taking `f64`).
+- `#[link_section]` as `#pragma data_seg`; `[x; N]` and drop loops, the caller-location
+  static and `panic_impl` made C89.
+- `[target] vendor-name` (for `target_vendor = "nt4"`), `#[export_name]`.
+- Fixes for every target: `&raw const STATIC` lost its pointer type in const propagation;
+  `c"..."` wasn't a literal in `macro_rules`; the saturating minimum of `i64`/`i128` was
+  2^59; float `%` used `remainder()` (Rust's truncates: `fmod`).
+
+Checked locally with clang (`-std=c89 -fms-extensions --target=i686-pc-windows-msvc` and
+stub NT 4.0 headers; `-DMRUSTC_C89_ALIGNCHECK` turns on alignment checks the output
+carries for that), then with the real compiler in CI.
+
+### Here
+
+- `crates/nt4rt/src/mrustc.rs` (mrustc only): the `start` lang item (mrustc has no
+  `#![no_main]`), `__rdl_alloc` and the rest on `NtHeap` (mrustc's allocator shims ignore
+  `#[global_allocator]`), `cbrt` and `fdim` (core calls them; the C library lacks them).
+  Under mrustc nt4rt has no `mainCRTStartup`: Microsoft's C run-time (LIBC.LIB, linked by
+  default) starts the program and calls the C `main` mrustc writes.
+- nt4compat under mrustc: each replacement function also under its Win32 name (mrustc's C
+  calls imports by name, rustc through `__imp_`), no `crt` module (the C run-time's start-up
+  and TLS directory instead).
+- `tools/mrustc-nt4/`: `targets/alpha-nt4.toml` (32-bit pointers, `target_arch = "alpha"`,
+  which has no module in core or std, so no AltiVec-like surprises), `include/` (`stdint.h`,
+  `stdbool.h`), `translate.sh` and `build.sh` (hello), `mkstd.sh`, `translate-std.sh` and
+  `build-std.sh` (std and stdtest), `std-edits.py` (what std needs for mrustc and Alpha beyond
+  `nt4.patch`, kept out of it because rustc's builds mustn't get them), `wrap/mrustc`.
+
+### Results
+
+- **hello**: RESULT_HELLO
+- **Visual C++ 4.1 on core**: `cl` compiles all of core (30 MB of C, 520,000 lines) in
+  134 to 161 s with a peak of about 360 MB (the container's); the object is 3.7 MB. alloc
+  (4.9 MB) takes 13 to 21 s. No compiler limit hit. link 3.10 links the 3.7 MB object and
+  the rest in about a second; hello.exe is 2.3 MB (no optimization yet, `-Od`).
+- **std and stdtest**: RESULT_STD
 
 ## The MIPS shortcut: rustc with COFF objects (to investigate)
 
