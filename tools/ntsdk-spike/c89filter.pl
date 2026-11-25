@@ -16,5 +16,11 @@ if ($code =~ /^(extern |static )?union u_static_/) {
     $code =~ s/\{ (.*?) val; (\w+) raw\[(\d+)\]; \}/{ $2 raw[$3]; $1 val; }/;
     $code =~ s/= \{ \.raw = /= { /;
 }
+# [x; N] in generated code: "for(unsigned int i = 0; ...)" and one statement on the next line
+our $close_next;
+if ($close_next && $code =~ /;\s*$/) { $code =~ s/;\s*$/; }/; $close_next = 0; }
+if ($code =~ s/^(\t+)for\(unsigned int i = 0;/$1\{ unsigned int i; for(i = 0;/) { $close_next = 1; }
+# a static declared after statements (#[track_caller] without a caller)
+$code =~ s/^(\t+)(static struct \w+ mrustc_empty_caller_location = .*;)\s*$/$1\{ $2 }/;
 $_ = $code . $comment;
 $_ .= "\n" unless /\n\z/;
