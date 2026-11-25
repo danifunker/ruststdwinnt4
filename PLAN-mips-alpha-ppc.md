@@ -336,7 +336,14 @@ carries for that), then with the real compiler in CI.
   `tools/mrustc-nt4/ntrun-stubs/` has stand-in DLLs (WS2_32, USERENV) and `ntrun-shims.c`
   (NtWriteFile, NtReadFile, SwitchToThread, the `*DirectoryW` calls, made of functions
   ntrun has), linked into the test programs only; mrustc's atomics take a lock with
-  `InterlockedExchange` rather than use `InterlockedCompareExchange`. STDTEST_RUN
+  `InterlockedExchange` rather than use `InterlockedCompareExchange`.
+  With them (run 45717430190), stdtest gets through its banner (`cmd /c ver`, which
+  ntrun's command processor answers with nothing), "threads, Mutex", "Condvar, RwLock" and
+  "channels, Once, park" (ok), then "thread_local + destructors" FAILS (0 of 4 destructors
+  ran: the TLS callbacks at thread exit, `#pragma data_seg(".CRT$XLB")` with LIBC's TLS
+  directory; whether ntrun calls TLS callbacks is unknown, so this needs a real NT 4.0 to
+  tell), and the "HashMap, random keys" check stops the program at `NtQuerySystemInformation`
+  (nt4compat's random seed). The job passes on stdsmoke and reports stdtest.
 
 ### Next
 
