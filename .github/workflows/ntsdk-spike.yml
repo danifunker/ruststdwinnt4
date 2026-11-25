@@ -92,10 +92,19 @@ jobs:
           case ${{ matrix.cpu }} in ppc) d=out-powerpc-nt4-msvc ;; *) d=out-mips-nt4-msvc ;; esac
           docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/compile-c.sh ${{ matrix.cpu }} \
             $d/hello.exe.c $d/libnt4rt.rlib.c $d/liballoc.rlib.c $d/libcore.rlib.c | tee summary.txt
+      # The same after c89filter.pl takes out the blockers the probes found: what cl says next.
+      - name: cl on mrustc's C, filtered
+        run: |
+          case ${{ matrix.cpu }} in ppc) d=out-powerpc-nt4-msvc ;; *) d=out-mips-nt4-msvc ;; esac
+          for f in hello.exe libnt4rt.rlib liballoc.rlib libcore.rlib; do
+            perl tools/ntsdk-spike/c89filter.pl < $d/$f.c > $d/$f.c89.c
+          done
+          docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/compile-c.sh ${{ matrix.cpu }} \
+            $d/hello.exe.c89.c $d/libnt4rt.rlib.c89.c $d/liballoc.rlib.c89.c $d/libcore.rlib.c89.c | tee summary-c89.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cl-${{ matrix.cpu }}
           path: |
-            summary.txt
+            summary*.txt
             out-*/*.log
