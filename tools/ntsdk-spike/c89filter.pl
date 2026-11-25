@@ -12,7 +12,7 @@ my ($code, $comment) = /^(.*?)(\/\/.*)?$/s ? ($1, $2 // '') : ($_, '');
 $code =~ s/\b(0x[0-9A-Fa-f]+|\d+)ull\b/$1ui64/g;
 $code =~ s/\b(0x[0-9A-Fa-f]+|\d+)ll\b/$1i64/g;
 # statics: union { T val; X raw[N]; } x = { .raw = {...} } -> raw first, positional
-if ($code =~ /^(extern )?union u_static_/) {
+if ($code =~ /^(extern |static )?union u_static_/) {
     $code =~ s/\{ (.*?) val; (\w+) raw\[(\d+)\]; \}/{ $2 raw[$3]; $1 val; }/;
     $code =~ s/= \{ \.raw = /= { /;
 }

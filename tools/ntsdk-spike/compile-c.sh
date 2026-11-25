@@ -15,7 +15,10 @@ for f; do
     end=$(date +%s)
     echo "== $f ($cpu): exit $rc, $((end - start)) s, $(wc -c < "$f") bytes"
     grep -oE '(fatal error|error|warning) C[0-9]+' "$log" | sort | uniq -c | sort -rn
-    for code in $(grep -oE '(fatal error|error) C[0-9]+' "$log" | grep -oE 'C[0-9]+' | sort -u); do
-        grep -m1 "$code" "$log" | sed 's/^/   e.g. /' | cut -c1-200
-    done
+    # the first 25 distinct errors past mrustc's prelude, with the line they point at
+    grep -E '\) : (fatal )?error' "$log" | while IFS= read -r m; do
+        n=$(printf '%s' "$m" | sed -nE 's/^[^(]*\(([0-9]+)\).*/\1/p')
+        [ -n "$n" ] && [ "$n" -gt 400 ] || continue
+        printf '   %s\n      | %s\n' "$(printf '%s' "$m" | cut -c1-160)" "$(sed -n "${n}p" "$f" | cut -c1-200)"
+    done | awk '!seen[$0]++' | head -50
 done
