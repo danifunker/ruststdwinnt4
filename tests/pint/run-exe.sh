@@ -13,6 +13,8 @@
 #
 # A GUI program has no console: it may write NAME.LOG instead, printed after NAME.OUT.
 #
+# ARGS_<NAME>='...' gives a program its command line (NAME: the first 8 characters of its
+# file name, upper case, with any but letters, digits and _ as _: vintrdp-x.exe, ARGS_VINTRDP_).
 # Environment: TIMEOUT (seconds, default 300), KEEP=1 keeps the work directory,
 # OUTDIR=dir copies everything the programs left in C:\TMP\RUST there,
 # REBOOT=path of reboot.exe (default: the release build of examples/reboot).
@@ -44,7 +46,7 @@ mcopy -o -i "$I" "$REBOOT" ::/TMP/RUST/REBOOT.EXE
     for exe in "$@"; do
         name=$(basename "$exe" .exe | tr a-z A-Z | cut -c1-8)
         mcopy -o -i "$I" "$exe" "::/TMP/RUST/$name.EXE"
-        args_var=ARGS_$name
+        args_var=ARGS_$(printf %s "$name" | tr -c A-Z0-9_ _)   # a variable name: - . and the like as _
         printf '%s.EXE %s > %s.OUT 2>&1\r\necho %%ERRORLEVEL%% > %s.RC\r\n' "$name" "${!args_var:-}" "$name" "$name"
     done
     printf 'REBOOT.EXE > REBOOT.OUT 2>&1\r\n'

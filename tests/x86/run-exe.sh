@@ -19,7 +19,8 @@
 #                 is the last to log on)
 #   NT_PASSWORD   its password (default: empty)
 #   TIMEOUT       seconds RUNTESTS.CMD gets once started (default 600)
-#   ARGS_<NAME>   a program's command line
+#   ARGS_<NAME>   a program's command line (NAME: the first 8 characters of its file name,
+#                 upper case, with any but letters, digits and _ as _: vintrdp-x.exe, ARGS_VINTRDP_)
 #   OUTDIR=dir    copy every file the programs left, and screen dumps, there
 #   KEEP=1        keep the work directory (screen dumps of each step: NN-step.ppm)
 #   QEMU          qemu-system-i386 with user networking (default: the first on PATH, then
@@ -64,7 +65,7 @@ names=()
         name=$(basename "$exe" .exe | tr a-z A-Z | cut -c1-8)
         names+=("$name")
         cp "$exe" "$W/cd/$name.EXE"
-        args_var=ARGS_$name
+        args_var=ARGS_$(printf %s "$name" | tr -c A-Z0-9_ _)   # a variable name: - . and the like as _
         printf 'D:\\%s.EXE %s > %s.OUT 2>&1\r\necho %%ERRORLEVEL%% > %s.RC\r\n' \
             "$name" "${!args_var:-}" "$name" "$name"
     done
