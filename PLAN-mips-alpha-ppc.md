@@ -302,11 +302,16 @@ carries for that), then with the real compiler in CI.
 
 ### Results
 
-- **hello**: RESULT_HELLO
+- **hello** (`examples/hello`, unchanged): **passes on Alpha under `ntrun`** (run
+  45683688135): "Hello from Rust on Windows NT 4.0 (build 1381)", all ten checks (heap,
+  64-byte-aligned allocation, formatting, 64-bit division, the 64-bit integer/float
+  conversions) and `hello: ok`.
 - **Visual C++ 4.1 on core**: `cl` compiles all of core (30 MB of C, 520,000 lines) in
   134 to 161 s with a peak of about 360 MB (the container's); the object is 3.7 MB. alloc
   (4.9 MB) takes 13 to 21 s. No compiler limit hit. link 3.10 links the 3.7 MB object and
-  the rest in about a second; hello.exe is 2.3 MB (no optimization yet, `-Od`).
+  the rest in about a second; hello.exe is 2.3 MB (`cl` without optimization flags so far).
+  In the std build (`debug_assertions`, as minicargo builds it): core 284 s, std (38 MB of
+  C) 177 s, the peak 363 MB, compiler_builtins 42 s, stdtest 54 s.
 - **std and stdtest**: RESULT_STD
 
 ## The MIPS shortcut: rustc with COFF objects (to investigate)
