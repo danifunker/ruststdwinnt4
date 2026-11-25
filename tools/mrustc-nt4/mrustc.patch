@@ -1,5 +1,5 @@
 diff --git a/src/trans/codegen_c.cpp b/src/trans/codegen_c.cpp
-index 6d076cc5..ed1d965b 100644
+index 6d076cc5..29c83991 100644
 --- a/src/trans/codegen_c.cpp
 +++ b/src/trans/codegen_c.cpp
 @@ -259,8 +259,16 @@ namespace {
@@ -696,6 +696,15 @@ index 6d076cc5..ed1d965b 100644
                          }
                          else
                          {
+@@ -7902,7 +8105,7 @@ namespace {
+ 
+                 else {
+                     // TODO: Platform intrinsics
+-                    m_of << "assert(!\"TODO: Platform intrinsic \\\"" << name << "\\\"\")";
++                    m_of << "assert(!\"TODO: Platform intrinsic '" << name << "'\")";  // No \" in it: Visual C++ 4.x's assert can't stringize that
+                 }
+             }
+             else {
 @@ -8064,7 +8267,7 @@ namespace {
              case ::HIR::CoreType::I32:
              case ::HIR::CoreType::I64:
@@ -759,10 +768,22 @@ index 6d076cc5..ed1d965b 100644
                      else
                      {
 diff --git a/src/trans/target.cpp b/src/trans/target.cpp
-index 324601a5..f175eb58 100644
+index 324601a5..dcbe85dd 100644
 --- a/src/trans/target.cpp
 +++ b/src/trans/target.cpp
-@@ -217,6 +217,11 @@ namespace
+@@ -136,6 +136,11 @@ namespace
+                         check_path_length(key_val, 2);
+                         rv.m_env_name = key_val.value.as_string();
+                     }
++                    else if( key_val.path[1] == "vendor-name" )
++                    {
++                        check_path_length(key_val, 2);
++                        rv.m_vendor_name = key_val.value.as_string();
++                    }
+                     else if( key_val.path[1] == "arch" )
+                     {
+                         check_path_length(key_val, 2);
+@@ -217,6 +222,11 @@ namespace
                              check_path_length(key_val, 3);
                              rv.m_backend_c.m_c_compiler = key_val.value.as_string();
                          }
@@ -774,7 +795,13 @@ index 324601a5..f175eb58 100644
                          else if( key_val.path[2] == "emulate-i128" )
                          {
                              check_path_length(key_val, 3);
-@@ -397,6 +402,7 @@ namespace
+@@ -392,11 +402,13 @@ namespace
+             << "family = \"" << spec.m_family << "\"\n"
+             << "os-name = \"" << spec.m_os_name << "\"\n"
+             << "env-name = \"" << spec.m_env_name << "\"\n"
++            << (spec.m_vendor_name.empty() ? "" : "vendor-name = \"" + spec.m_vendor_name + "\"\n")
+             //<< "arch = \"" << spec.m_arch.m_name << "\"\n"
+             << "\n"
              << "[backend.c]\n"
              << "variant = \"" << H::c_variant_name(spec.m_backend_c.m_codegen_mode) << "\"\n"
              << "target = \"" << spec.m_backend_c.m_c_compiler << "\"\n"
@@ -782,8 +809,19 @@ index 324601a5..f175eb58 100644
              << "compiler-opts = ["; for(const auto& s : spec.m_backend_c.m_compiler_opts) of << "\"" << s << "\","; of << "]\n"
              << "linker-opts-pre = ["; for(const auto& s : spec.m_backend_c.m_linker_opts_pre) of << "\"" << s << "\","; of << "]\n"
              << "linker-opts-post = ["; for(const auto& s : spec.m_backend_c.m_linker_opts_post) of << "\"" << s << "\","; of << "]\n"
+@@ -693,6 +705,10 @@ void Target_SetCfg(const ::std::string& target_name)
+ {
+     g_target = init_from_spec_name(target_name);
+ 
++    if( !g_target.m_vendor_name.empty() ) {
++        Cfg_SetValue("target_vendor", g_target.m_vendor_name);
++    }
++
+     if(g_target.m_family == "unix") {
+         Cfg_SetFlag("unix");
+     }
 diff --git a/src/trans/target.hpp b/src/trans/target.hpp
-index 50fa0632..fa77c043 100644
+index 50fa0632..d37b5d4e 100644
 --- a/src/trans/target.hpp
 +++ b/src/trans/target.hpp
 @@ -68,6 +68,10 @@ struct BackendOptsC
@@ -797,3 +835,11 @@ index 50fa0632..fa77c043 100644
  };
  struct TargetSpec
  {
+@@ -77,6 +81,7 @@ struct TargetSpec
+ 
+     BackendOptsC    m_backend_c;
+     TargetArch  m_arch;
++    ::std::string   m_vendor_name = "";  // `target_vendor`, if not the OS's default (e.g. "nt4")
+ };
+ 
+ struct TypeRepr

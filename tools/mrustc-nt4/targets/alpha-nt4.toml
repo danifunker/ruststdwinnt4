@@ -6,6 +6,7 @@
 family = "windows"
 os-name = "windows"
 env-name = "msvc"
+vendor-name = "nt4"
 
 [backend.c]
 variant = "msvc"
