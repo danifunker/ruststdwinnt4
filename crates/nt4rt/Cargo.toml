@@ -10,3 +10,7 @@ default = ["rt"]
 # The program entry point (mainCRTStartup) and the panic handler. Leave it out in a
 # program or library that brings its own.
 rt = []
+
+[lints.rust]
+# Set by mrustc, which builds this crate for Alpha, MIPS and PowerPC
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rust_compiler, values("mrustc"))'] }

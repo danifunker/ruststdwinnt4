@@ -12,6 +12,8 @@
 //!
 //! Only functions NT 4.0 SP0 exports are used.
 #![cfg_attr(not(test), no_std)]
+// mrustc (Alpha, MIPS, PowerPC) needs the start lang item: see mrustc.rs
+#![cfg_attr(rust_compiler = "mrustc", feature(lang_items))]
 
 pub mod console;
 // The compiler's helpers are shared with nt4compat, the compatibility layer std links on
@@ -29,6 +31,8 @@ mod helpers;
 mod helpers_x86;
 #[cfg(all(feature = "rt", not(test)))]
 mod start;
+#[cfg(all(feature = "rt", not(test), rust_compiler = "mrustc"))]
+mod mrustc;
 
 #[cfg(all(feature = "rt", not(test)))]
 pub use start::Termination;

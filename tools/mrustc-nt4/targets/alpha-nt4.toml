@@ -1,0 +1,33 @@
+# Windows NT 4.0 on Alpha for mrustc: 32-bit pointers (NT runs Alpha with 32-bit addresses
+# in 64-bit registers, so as far as C goes this is a 32-bit target), little-endian, C89 for
+# Visual C++ 4.1 (tenox7/ntsdk). The arch name has no module in core or std, so no
+# target_arch-specific code comes in (PowerPC's would bring AltiVec).
+[target]
+family = "windows"
+os-name = "windows"
+env-name = "msvc"
+
+[backend.c]
+variant = "msvc"
+target = "cl"
+emulate-i128 = true
+c89 = true
+
+[arch]
+name = "alpha"
+pointer-bits = 32
+is-big-endian = false
+has-atomic-u8 = true
+has-atomic-u16 = true
+has-atomic-u32 = true
+has-atomic-u64 = false
+has-atomic-ptr = true
+
+[arch.alignments]
+u16 = 2
+u32 = 4
+u64 = 8
+u128 = 8
+f32 = 4
+f64 = 8
+ptr = 4

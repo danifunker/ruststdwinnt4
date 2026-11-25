@@ -1,0 +1,799 @@
+diff --git a/src/trans/codegen_c.cpp b/src/trans/codegen_c.cpp
+index 6d076cc5..ed1d965b 100644
+--- a/src/trans/codegen_c.cpp
++++ b/src/trans/codegen_c.cpp
+@@ -259,8 +259,16 @@ namespace {
+         struct {
+             bool emulated_i128 = false;
+             bool disallow_empty_structs = false;
++            // C89 for Visual C++ 4.x (`backend.c.c89`): see `BackendOptsC::m_c89`
++            bool c89 = false;
+         } m_options;
+ 
++        // 64-bit integer literal suffixes (`long long` is C99; old MSVC has `i64`/`ui64`)
++        const char* sfx_ll() const { return m_options.c89 ? "i64" : "ll"; }
++        const char* sfx_ull() const { return m_options.c89 ? "ui64" : "ull"; }
++        // C89 has no `__alignof`, and Visual C++ 4.x cannot align above 8: alignment as the C compiler gives it
++        static size_t c89_align(size_t a) { return a > 8 ? 8 : a; }
++
+ 
+         ::std::set< ::HIR::TypeRef> m_emitted_fn_types;
+         ::std::set< const TypeRepr*>    m_embedded_tags;
+@@ -274,9 +282,11 @@ namespace {
+         {
+             ASSERT_BUG(Span(), m_of.is_open(), "Failed to open `" << m_outfile_path_c << "` for writing");
+             m_options.emulated_i128 = Target_GetCurSpec().m_backend_c.m_emulated_i128;
++            m_options.c89 = Target_GetCurSpec().m_backend_c.m_c89;
+             switch(Target_GetCurSpec().m_backend_c.m_codegen_mode)
+             {
+             case CodegenMode::Gnu11:
++                ASSERT_BUG(Span(), !m_options.c89, "backend.c.c89 needs variant = \"msvc\"");
+                 m_compiler = Compiler::Gcc;
+                 if( Target_GetCurSpec().m_arch.m_pointer_bits < 64 && !m_options.emulated_i128 )
+                 {
+@@ -316,6 +326,44 @@ namespace {
+                     ;
+                 break;
+             case Compiler::Msvc:
++                if( m_options.c89 )
++                {
++                    // Visual C++ 4.x: no intrin.h/immintrin.h; `inline` is C99 (`__inline` works)
++                    // No windows.h: extern functions are declared under their own names in this mode
++                    // (no `/alternatename`), and would clash with the SDK's prototypes.
++                    // The same goes for the C library's headers: the few functions the C code uses directly are declared here.
++                    m_of
++                        << "#define inline __inline\n"
++                        << "void abort(void);\n"
++                        << "void* memcpy(void*, const void*, size_t);\n"
++                        << "void* memmove(void*, const void*, size_t);\n"
++                        << "void* memset(void*, int, size_t);\n"
++                        << "int memcmp(const void*, const void*, size_t);\n"
++                        // Floating point: Visual C++ 4.x's C library has the C89 double functions only
++                        << "double fabs(double); double floor(double); double ceil(double); double sqrt(double);\n"
++                        << "double pow(double, double); double exp(double); double log(double); double log10(double);\n"
++                        << "double sin(double); double cos(double); double fmod(double, double);\n"
++                        << "static double __mrustc_f64_bits(uint64_t v) { double d; memcpy(&d, &v, 8); return d; }\n"
++                        << "#define INFINITY __mrustc_f64_bits(0x7FF0000000000000ui64)\n"
++                        << "#define NAN __mrustc_f64_bits(0x7FF8000000000000ui64)\n"
++                        << "static double trunc(double x) { return x < 0 ? ceil(x) : floor(x); }\n"
++                        << "static double round(double x) { double t = trunc(x); if( fabs(x - t) >= 0.5 ) t += (x < 0 ? -1.0 : 1.0); return t; }\n"
++                        << "static double copysign(double x, double y) { uint64_t a, b; memcpy(&a, &x, 8); memcpy(&b, &y, 8);"
++                        << " a = (a & 0x7FFFFFFFFFFFFFFFui64) | (b & 0x8000000000000000ui64); memcpy(&x, &a, 8); return x; }\n"
++                        << "static double exp2(double x) { return pow(2.0, x); }\n"
++                        << "static double log2(double x) { return log(x) / 0.69314718055994530942; }\n"
++                        << "static double fma(double a, double b, double c) { return a * b + c; }\n"
++                        ;
++                    for(const char* fn : {"fabs", "floor", "ceil", "sqrt", "exp", "log", "log10", "sin", "cos", "trunc", "round", "exp2", "log2"})
++                        m_of << "#define " << fn << "f(x) ((float)" << fn << "((double)(x)))\n";
++                    for(const char* fn : {"pow", "fmod", "copysign"})
++                        m_of << "#define " << fn << "f(x, y) ((float)" << fn << "((double)(x), (double)(y)))\n";
++                    m_of
++                        << "#define fmaf(a, b, c) ((float)fma((double)(a), (double)(b), (double)(c)))\n"
++                        << "__declspec(dllimport) void* __stdcall InterlockedCompareExchange(void** Destination, void* Exchange, void* Comperand);\n"
++                        ;
++                    break;
++                }
+                 m_of
+                     << "#include <windows.h>\n"
+                     << "#include <math.h>\n"  // fabsf, ...
+@@ -361,6 +409,12 @@ namespace {
+                     ;
+                 break;
+             case Compiler::Msvc:
++                if( m_options.c89 )
++                {
++                    // No `__declspec(noreturn)` or `__alignof` (alignments are emitted as numbers)
++                    m_of << "static void _Unwind_Resume(void) { abort(); }\n";
++                    break;
++                }
+                 m_of
+                     << "__declspec(noreturn) static void _Unwind_Resume(void) { abort(); }\n"
+                     << "#define ALIGNOF(t) __alignof(t)\n"
+@@ -400,12 +454,30 @@ namespace {
+                 }
+                 break;
+             case Compiler::Msvc:
++                if( m_options.c89 )
++                {
++                    // Plain C for what newer MSVC has as intrinsics
++                    m_of
++                        << "static inline int __mrustc_popcnt32(uint32_t v) { v = v - ((v >> 1) & 0x55555555u); v = (v & 0x33333333u) + ((v >> 2) & 0x33333333u); return (int)((((v + (v >> 4)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24); }\n"
++                        << "static inline int32_t __builtin_popcountll(uint64_t v) { return __mrustc_popcnt32((uint32_t)v) + __mrustc_popcnt32((uint32_t)(v >> 32)); }\n"
++                        << "static inline int __builtin_ctz(uint32_t v) { int rv = 0; if(v == 0) return 32; while( !(v & 1) ) { v >>= 1; rv ++; } return rv; }\n"
++                        << "static inline int __builtin_clz(uint32_t v) { int rv = 0; if(v == 0) return 32; while( !(v & 0x80000000u) ) { v <<= 1; rv ++; } return rv; }\n"
++                        << "static inline uint16_t _byteswap_ushort(uint16_t v) { return (uint16_t)((v >> 8) | (v << 8)); }\n"
++                        << "static inline uint32_t _byteswap_ulong(uint32_t v) { return (v >> 24) | ((v >> 8) & 0xFF00u) | ((v << 8) & 0xFF0000u) | (v << 24); }\n"
++                        << "static inline uint64_t _byteswap_uint64(uint64_t v) { return ((uint64_t)_byteswap_ulong((uint32_t)v) << 32) | _byteswap_ulong((uint32_t)(v >> 32)); }\n"
++                        ;
++                }
++                else
++                {
++                    m_of
++                        << "static inline int32_t __builtin_popcountll(uint64_t v) {\n"
++                        << "\treturn __popcnt(v & 0xFFFFFFFF) + __popcnt(v >> 32);\n"
++                        << "}\n"
++                        << "static inline int __builtin_ctz(uint32_t v) { int rv; _BitScanForward(&rv, v); return rv; }\n"
++                        << "static inline int __builtin_clz(uint32_t v) { int rv; _BitScanReverse(&rv, v); return 31 - rv; }\n"
++                        ;
++                }
+                 m_of
+-                    << "static inline int32_t __builtin_popcountll(uint64_t v) {\n"
+-                    << "\treturn __popcnt(v & 0xFFFFFFFF) + __popcnt(v >> 32);\n"
+-                    << "}\n"
+-                    << "static inline int __builtin_ctz(uint32_t v) { int rv; _BitScanForward(&rv, v); return rv; }\n"
+-                    << "static inline int __builtin_clz(uint32_t v) { int rv; _BitScanReverse(&rv, v); return 31 - rv; }\n"
+                     << "static inline uint64_t __builtin_clz64(uint64_t v) {\n"
+                     << "\treturn ( (v >> 32) != 0 ? __builtin_clz(v>>32) : 32 + __builtin_clz(v) );\n"
+                     << "}\n"
+@@ -555,6 +627,63 @@ namespace {
+                     << "\treturn __builtin_add_overflow_i" << Target_GetCurSpec().m_arch.m_pointer_bits << "(a, b, out);\n"
+                     << "}\n"
+                     << "static inline uint64_t __builtin_bswap64(uint64_t v) { return _byteswap_uint64(v); }\n"
++                    ;
++                if( m_options.c89 )
++                {
++                    // Atomics for NT 4.0: kernel32 has only the 32-bit InterlockedCompareExchange (with
++                    // PVOID arguments); everything else is a compare-exchange loop, 8 and 16 bits on the
++                    // aligned 32-bit word that holds them (little-endian). The orderings are all SeqCst.
++                    // `__mrustc_atomic_OPn` are what emit_msvc_atomic_op writes in this mode.
++                    m_of
++                        << "static uint32_t __mrustc_cas32(volatile void* p, uint32_t n, uint32_t o) { return (uint32_t)InterlockedCompareExchange((void**)p, (void*)n, (void*)o); }\n"
++                        << "static uint32_t __mrustc_atomic_load(volatile void* p, unsigned bits) {"
++                        << " if(bits == 8) return *(volatile uint8_t*)p; if(bits == 16) return *(volatile uint16_t*)p; return __mrustc_cas32(p, 0, 0); }\n"
++                        // Compare-exchange: returns the old value (as InterlockedCompareExchange)
++                        << "static uint32_t __mrustc_atomic_cas(volatile void* p, unsigned bits, uint32_t n, uint32_t o) {"
++                        << " volatile uint32_t* w; unsigned sh; uint32_t mask, cur, want;"
++                        << " if(bits == 32) return __mrustc_cas32(p, n, o);"
++                        << " w = (volatile uint32_t*)((uintptr_t)p & ~(uintptr_t)3);"
++                        << " sh = (unsigned)((uintptr_t)p & 3) * 8;"
++                        << " mask = (bits == 8 ? 0xFFu : 0xFFFFu);"
++                        << " n &= mask; o &= mask;"
++                        << " for(;;) {"
++                        <<   " cur = *w;"
++                        <<   " if( ((cur >> sh) & mask) != o ) return (cur >> sh) & mask;"
++                        <<   " want = (cur & ~(mask << sh)) | (n << sh);"
++                        <<   " if( __mrustc_cas32(w, want, cur) == cur ) return o;"
++                        << " }"
++                        << " }\n"
++                        // Read-modify-write: 0 add, 1 and, 2 or, 3 xor, 4 exchange; returns the old value
++                        << "static uint32_t __mrustc_atomic_rmw(volatile void* p, unsigned bits, int op, uint32_t v) {"
++                        << " uint32_t mask = (bits == 8 ? 0xFFu : bits == 16 ? 0xFFFFu : 0xFFFFFFFFu), o, n;"
++                        << " for(;;) {"
++                        <<   " o = __mrustc_atomic_load(p, bits) & mask;"
++                        <<   " switch(op) { case 0: n = o + v; break; case 1: n = o & v; break; case 2: n = o | v; break; case 3: n = o ^ v; break; default: n = v; break; }"
++                        <<   " if( __mrustc_atomic_cas(p, bits, n & mask, o) == o ) return o;"
++                        << " }"
++                        << " }\n"
++                        ;
++                    for(int sz = 8; sz <= 32; sz *= 2)
++                    {
++                        m_of
++                            << "#define __mrustc_atomic_InterlockedCompareExchange"<<sz<<"(p, n, o) __mrustc_atomic_cas((p), "<<sz<<", (uint32_t)(n), (uint32_t)(o))\n"
++                            << "#define __mrustc_atomic_InterlockedExchangeAdd"<<sz<<"(p, v) __mrustc_atomic_rmw((p), "<<sz<<", 0, (uint32_t)(v))\n"
++                            << "#define __mrustc_atomic_InterlockedAnd"<<sz<<"(p, v) __mrustc_atomic_rmw((p), "<<sz<<", 1, (uint32_t)(v))\n"
++                            << "#define __mrustc_atomic_InterlockedOr"<<sz<<"(p, v) __mrustc_atomic_rmw((p), "<<sz<<", 2, (uint32_t)(v))\n"
++                            << "#define __mrustc_atomic_InterlockedXor"<<sz<<"(p, v) __mrustc_atomic_rmw((p), "<<sz<<", 3, (uint32_t)(v))\n"
++                            << "#define __mrustc_atomic_InterlockedExchange"<<sz<<"(p, v) __mrustc_atomic_rmw((p), "<<sz<<", 4, (uint32_t)(v))\n"
++                            << "static uint"<<sz<<"_t __mrustc_atomicloop"<<sz<<"(volatile uint"<<sz<<"_t* slot, uint"<<sz<<"_t param, uint"<<sz<<"_t (*cb)(uint"<<sz<<"_t, uint"<<sz<<"_t)) {"
++                            << " uint"<<sz<<"_t v;"
++                            << " for(;;) {"
++                            << " v = (uint"<<sz<<"_t)__mrustc_atomic_load(slot, "<<sz<<");"
++                            << " if( (uint"<<sz<<"_t)__mrustc_atomic_cas(slot, "<<sz<<", cb(v, param), v) == v ) return v;"
++                            << " }"
++                            << "}\n"
++                            ;
++                    }
++                    break;
++                }
++                m_of
+                     << "#define InterlockedCompareExchange8Acquire _InterlockedCompareExchange8\n"
+                     << "#define InterlockedCompareExchange8Release _InterlockedCompareExchange8\n"
+                     << "#define InterlockedCompareExchange8NoFence _InterlockedCompareExchange8\n"
+@@ -629,25 +758,25 @@ namespace {
+                     << "static inline uint128_t shl128(uint128_t a, uint32_t b);\n"
+                     << "static inline uint128_t shr128(uint128_t a, uint32_t b);\n"
+                     << "static inline float make_float(int is_neg, int exp, uint32_t mantissa_bits) { float rv; uint32_t vi=(mantissa_bits&((1<<23)-1))|((exp+127)<<23);if(is_neg)vi|=1<<31; memcpy(&rv, &vi, 4); return rv; }\n"
+-                    << "static inline double make_double(int is_neg, int exp, uint32_t mantissa_bits) { double rv; uint64_t vi=(mantissa_bits&((1ull<<52)-1))|((uint64_t)(exp+1023)<<52);if(is_neg)vi|=1ull<<63; memcpy(&rv, &vi, 4); return rv; }\n"
++                    << "static inline double make_double(int is_neg, int exp, uint32_t mantissa_bits) { double rv; uint64_t vi=(mantissa_bits&((1" << sfx_ull() << "<<52)-1))|((uint64_t)(exp+1023)<<52);if(is_neg)vi|=1" << sfx_ull() << "<<63; memcpy(&rv, &vi, 4); return rv; }\n"
+                     << "static inline uint128_t make128_raw(uint64_t hi, uint64_t lo) { uint128_t rv = { lo, hi }; return rv; }\n"
+                     << "static inline uint128_t make128(uint64_t v) { uint128_t rv = { v, 0 }; return rv; }\n"
+                     // https://blog.m-ou.se/floats/
+                     << "static inline float cast128_float(uint128_t v) {"
+-                    << " int n = intrinsic_ctlz_u128(v).lo;"
++                    << " int n = (int)intrinsic_ctlz_u128(v).lo;"
+                     << " uint128_t y = shl128(v, n);"
+                     << " uint64_t a = (y.hi >> ((128-(23+1))-64));" // Base mantissa (top 24 bits)
+-                    << " uint64_t b = shr128(y, (64-(23+1))).lo | (y.lo & 0xFFFFFFFFFF);" // Were any discarded bits set? (shift right by 40 to get 64 bits with the top just before the last mantissa bit, then extract 40 bits from low)
++                    << " uint64_t b = shr128(y, (64-(23+1))).lo | (y.lo & 0xFFFFFFFFFF" << sfx_ull() << ");" // Were any discarded bits set? (shift right by 40 to get 64 bits with the top just before the last mantissa bit, then extract 40 bits from low)
+                     << " uint64_t m = a + ((b - ((b >> 63) & ~a)) >> 63);"    // Account for rounding
+                     << " uint64_t e = (v.lo == 0 && v.hi == 0) ? 0 : (127 - n)+127-1;"  // Exponent, with the -1 to fudge the 24th bit in mantissa
+-                    << " uint32_t vi = (e << 23) + m;"  // Add is like or, but the final bit of the mantissa can propagate through the exponent (intended)
++                    << " uint32_t vi = (uint32_t)((e << 23) + m);"  // Add is like or, but the final bit of the mantissa can propagate through the exponent (intended)
+                     //<< " printf(\"%016llx:%016llx n=%i,a=%#llx,b=%#llx  e=%lli,m=%#llx vi=%#lx\\n\", v.hi,v.lo, n, a, b, e, m, vi);"
+                     << " float rv;"
+                     << " memcpy(&rv, &vi, sizeof(rv));"
+                     << " return rv;"
+                     << " }\n"
+                     << "static inline double cast128_double(uint128_t v) {"
+-                    << " int n = intrinsic_ctlz_u128(v).lo;"
++                    << " int n = (int)intrinsic_ctlz_u128(v).lo;"
+                     << " uint128_t y = shl128(v, n);"
+                     << " uint64_t a = (y.hi >> ((128-(52+1))-64));"
+                     << " uint64_t b = shr128(y, (64-(52+1))).lo | (y.lo & 0x7FF);"
+@@ -666,9 +795,11 @@ namespace {
+                     // Serial shift+add
+                     << "static inline bool mul128_o(uint128_t a, uint128_t b, uint128_t* o) {"
+                     << " bool of = false;"
++                    << " int i;"
++                    << " uint64_t m;"
+                     << " o->hi = 0; o->lo = 0;"
+-                    << " for(int i=0;i<128;i++){"
+-                    <<  " uint64_t m = (1ull << (i % 64));"
++                    << " for(i=0;i<128;i++){"
++                    <<  " m = (1" << sfx_ull() << " << (i % 64));"
+                     <<  " if(a.hi==0&&a.lo<m)   break;"
+                     <<  " if(i>=64&&a.hi<m) break;"
+                     <<  " if( m & (i >= 64 ? a.hi : a.lo) ) of |= add128_o(*o, b, o);"
+@@ -679,16 +810,17 @@ namespace {
+                     << "}\n"
+                     // Long division
+                     << "static inline bool div128_o(uint128_t a, uint128_t b, uint128_t* q, uint128_t* r) {"
++                    << " uint128_t a_div_2, mask;"
++                    << " int shift = 0;"
+                     << " if(a.hi == 0 && b.hi == 0) { if(q) { q->hi=0; q->lo = a.lo / b.lo; } if(r) { r->hi=0; r->lo = a.lo % b.lo; } return false; }"
+                     << " if(cmp128(a, b) < 0) { if(q) { q->hi=0; q->lo=0; } if(r) *r = a; return false; }"
+-                    << " uint128_t a_div_2 = {(a.lo>>1)|(a.hi << 63), a.hi>>1};"
+-                    << " int shift = 0;"
++                    << " a_div_2.lo = (a.lo>>1)|(a.hi << 63); a_div_2.hi = a.hi>>1;"
+                     << " while( cmp128(a_div_2, b) >= 0 && shift < 128 ) {"
+                     <<  " shift += 1;"
+                     <<  " b.hi = (b.hi<<1)|(b.lo>>63); b.lo <<= 1;"
+                     <<  " }"
+                     << " if(shift == 128) return true;" // true = overflowed
+-                    << " uint128_t mask = { /*lo=*/(shift >= 64 ? 0 : (1ull << shift)), /*hi=*/(shift < 64 ? 0 : 1ull << (shift-64)) };"
++                    << " mask.lo = (shift >= 64 ? 0 : (1" << sfx_ull() << " << shift)); mask.hi = (shift < 64 ? 0 : 1" << sfx_ull() << " << (shift-64));"
+                     << " shift ++;"
+                     << " if(q) { q->hi = 0; q->lo = 0; }"
+                     << " while(shift--) {"
+@@ -734,24 +866,26 @@ namespace {
+                     << " }\n"
+                     << "static inline int cmp128s(int128_t a, int128_t b) { if(a.hi != b.hi) return (int64_t)a.hi < (int64_t)b.hi ? -1 : 1; if(a.lo != b.lo) return a.lo < b.lo ? -1 : 1; return 0; }\n"
+                     // Returns true if overflow happens (if negative with pos,pos or positive with neg,neg)
+-                    << "static inline bool add128s_o(int128_t a, int128_t b, int128_t* o) { bool sgna=a.hi>>63; bool sgnb=b.hi>>63; add128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o); bool sgno = o->hi>>63; return (sgna==sgnb && sgno != sgna); }\n"
++                    << "static inline bool add128s_o(int128_t a, int128_t b, int128_t* o) { bool sgna=(bool)(a.hi>>63); bool sgnb=(bool)(b.hi>>63); bool sgno; add128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o); sgno = (bool)(o->hi>>63); return (sgna==sgnb && sgno != sgna); }\n"
+                     // Returns true if overflow happens (if neg with pos,neg or pos with neg,pos)
+-                    << "static inline bool sub128s_o(int128_t a, int128_t b, int128_t* o) { bool sgna=a.hi>>63; bool sgnb=b.hi>>63; sub128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o); bool sgno = o->hi>>63; return (sgna!=sgnb && sgno != sgna); }\n"
++                    << "static inline bool sub128s_o(int128_t a, int128_t b, int128_t* o) { bool sgna=(bool)(a.hi>>63); bool sgnb=(bool)(b.hi>>63); bool sgno; sub128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o); sgno = (bool)(o->hi>>63); return (sgna!=sgnb && sgno != sgna); }\n"
+                     << "static inline bool mul128s_o(int128_t a, int128_t b, int128_t* o) {"
+-                    << " bool sgna = (a.hi >> 63);"
+-                    << " bool sgnb = (b.hi >> 63);"
++                    << " bool sgna = (bool)(a.hi >> 63);"
++                    << " bool sgnb = (bool)(b.hi >> 63);"
++                    << " bool rv;"
+                     << " if(sgna) a = neg128s(a);"
+                     << " if(sgnb) b = neg128s(b);"
+-                    << " bool rv = mul128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o);"
++                    << " rv = mul128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)o);"
+                     << " if(sgna != sgnb) *o = neg128s(*o);"
+                     << " return rv;"
+                     << " }\n"
+                     << "static inline bool div128s_o(int128_t a, int128_t b, int128_t* q, int128_t* r) {"
+                     << " bool sgna = (a.hi >> 63) != 0;"
+                     << " bool sgnb = (b.hi >> 63) != 0;"
++                    << " bool rv;"
+                     << " if(sgna) a = neg128s(a);"
+                     << " if(sgnb) b = neg128s(b);"
+-                    << " bool rv = div128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)q, (uint128_t*)r);"
++                    << " rv = div128_o(*(uint128_t*)&a, *(uint128_t*)&b, (uint128_t*)q, (uint128_t*)r);"
+                     << " if(sgna != sgnb && q) *q = neg128s(*q);"
+                     << " if(sgna && r) *r = neg128s(*r);"    // Remainder has the same sign as the dividend (a)
+                     << " return rv;"
+@@ -813,7 +947,8 @@ namespace {
+                 << "\n"
+                 // A linear (fast-fail) search of a list of strings
+                 << "static inline size_t mrustc_string_search_linear(SLICE_PTR val, size_t count, SLICE_PTR* options) {\n"
+-                << "\tfor(size_t i = 0; i < count; i ++) {\n"
++                << "\tsize_t i;\n"
++                << "\tfor(i = 0; i < count; i ++) {\n"
+                 << "\t\tint cmp = slice_cmp(val, options[i]);\n"
+                 << "\t\tif(cmp < 0) break;\n"
+                 << "\t\tif(cmp == 0) return i;\n"
+@@ -934,7 +1069,7 @@ namespace {
+                                     out.push_back("uintptr_t");
+                                     break;
+                                 case AllocatorDataTy::Ptr:    // *mut u8
+-                                    out.push_back("int8_t*");
++                                    out.push_back("uint8_t*");
+                                     break;
+                                 case AllocatorDataTy::Usize:
+                                     out.push_back("uintptr_t");
+@@ -947,7 +1082,7 @@ namespace {
+                                 case AllocatorDataTy::Unit:
+                                     return "void";
+                                 case AllocatorDataTy::ResultPtr:  // (..., *mut i8) + *mut u8
+-                                    return "int8_t*";
++                                    return "uint8_t*";
+                                 // - Args
+                                 case AllocatorDataTy::Layout: // usize, usize
+                                 case AllocatorDataTy::Ptr:    // *mut u8
+@@ -1015,7 +1150,8 @@ namespace {
+                             // Force abort on alloc error, rustc uses `-Zoom={panic,abort}` to select this
+                             m_of << "uint8_t __rust_alloc_error_handler_should_panic_v2() { return 0; }";
+                         }
+-                        m_of << "void __rust_alloc_error_handler(uintptr_t s, uintptr_t a) {\n";
++                        // C89: the same type as mrustc's prototype (the names are not separate there)
++                        m_of << (m_options.c89 ? "tBANG" : "void") << " __rust_alloc_error_handler(uintptr_t s, uintptr_t a) {\n";
+                         if(oom_method == HIR::SimplePath()) {
+                             m_of << "\tvoid __rdl_oom(uintptr_t, uintptr_t);\n";
+                             m_of << "\t__rdl_oom(s,a);\n";
+@@ -1028,6 +1164,8 @@ namespace {
+                             m_of << "\tvoid __rg_oom(uintptr_t, uintptr_t);\n";
+                             m_of << "\t__rg_oom(s,a);\n";
+                         }
++                        if( m_options.c89 )
++                            m_of << "\tabort();\n";
+                         m_of << "}\n";
+                     }
+                     else
+@@ -1689,7 +1827,11 @@ namespace {
+                 m_of << "tTYPEID __typeid_" << Trans_Mangle(ty) << " __attribute__((weak));\n";
+                 break;
+             case Compiler::Msvc:
+-                m_of << "__declspec(selectany) tTYPEID __typeid_" << Trans_Mangle(ty) << ";\n";
++                // C89 (Visual C++ 4.x has no selectany): an uninitialised global is communal, so
++                // every object file can define it.
++                if( !m_options.c89 )
++                    m_of << "__declspec(selectany) ";
++                m_of << "tTYPEID __typeid_" << Trans_Mangle(ty) << ";\n";
+                 break;
+             }
+         }
+@@ -1869,7 +2011,9 @@ namespace {
+                 switch(m_compiler)
+                 {
+                 case Compiler::Msvc:
+-                    m_of << "__declspec(align(" << repr->align << "))\n";
++                    // C89 (Visual C++ 4.x): no `__declspec(align)`; explicit padding keeps the size
++                    if( !m_options.c89 )
++                        m_of << "__declspec(align(" << repr->align << "))\n";
+                     break;
+                 case Compiler::Gcc:
+                     break;
+@@ -1913,6 +2057,11 @@ namespace {
+                     {
+                         field_align = 4;
+                     }
++                    // C89 (Visual C++ 4.x): the C compiler aligns to at most 8; padding makes up the rest
++                    if( m_options.c89 )
++                    {
++                        field_align = c89_align(field_align);
++                    }
+                     a = packing_max_align > 0 ? std::min<size_t>(packing_max_align, field_align) : field_align;
+                     DEBUG("a = " << a);
+                     while(cur_ofs % a != 0)
+@@ -1966,6 +2115,11 @@ namespace {
+             {
+                 m_of << "\tchar _d;\n";
+             }
++            // C89: alignment above 8 is not available, so pad to the size (the start is only 8-aligned)
++            else if( m_options.c89 && !has_unsized && repr->size != SIZE_MAX && cur_ofs < repr->size )
++            {
++                m_of << "\tuint8_t _tailpad[" << (repr->size - cur_ofs) << "];\n";
++            }
+             m_of << "}";
+             if(has_manual_align)
+             {
+@@ -2053,7 +2207,8 @@ namespace {
+                     switch(m_compiler)
+                     {
+                     case Compiler::Msvc:
+-                        m_of << "__declspec(align(" << align << "))\n";
++                        if( !m_options.c89 )
++                            m_of << "__declspec(align(" << align << "))\n";
+                         break;
+                     case Compiler::Gcc:
+                         break;
+@@ -2129,7 +2284,9 @@ namespace {
+                 // TODO: Handle unsized (should check the size of the fixed-size region)
+                 m_of << "typedef char sizeof_assert_" << Trans_Mangle(p) << "[ (sizeof(struct s_" << Trans_Mangle(p) << ") == " << repr->size << ") ? 1 : -1 ];\n";
+             }
+-            m_of << "typedef char alignof_assert_" << Trans_Mangle(p) << "[ (ALIGNOF(struct s_" << Trans_Mangle(p) << ") == " << repr->align << ") ? 1 : -1 ];\n";
++            // C89 has no alignof (and the C alignment is capped at 8 there)
++            if( !m_options.c89 )
++                m_of << "typedef char alignof_assert_" << Trans_Mangle(p) << "[ (ALIGNOF(struct s_" << Trans_Mangle(p) << ") == " << repr->align << ") ? 1 : -1 ];\n";
+ 
+             m_mir_res = nullptr;
+         }
+@@ -2468,13 +2625,20 @@ namespace {
+             bool rv = ( align * 8 >= Target_GetCurSpec().m_arch.m_pointer_bits );
+             m_of << "union u_static_" << Trans_Mangle(p);
+             if(is_proto) {
+-                m_of << "{ "; emit_ctype( type, FMT_CB(ss, ss << "val";) ); m_of << "; ";
++                m_of << "{ ";
++                // C89 has no designated initializers: `raw` goes first, so that `{ {...} }` initialises it
++                if( !m_options.c89 ) {
++                    emit_ctype( type, FMT_CB(ss, ss << "val";) ); m_of << "; ";
++                }
+                 if( rv ) {
+                     m_of << "uintptr_t raw[" << (size / (Target_GetCurSpec().m_arch.m_pointer_bits / 8)) << "];";
+                 }
+                 else {
+                     m_of << "uint8_t raw[" << size << "];";
+                 }
++                if( m_options.c89 ) {
++                    m_of << " "; emit_ctype( type, FMT_CB(ss, ss << "val";) ); m_of << ";";
++                }
+                 m_of << " }";
+             }
+             m_of << " " << Trans_Mangle(p);
+@@ -2510,7 +2674,7 @@ namespace {
+                 m_of << linkage_name << "[0];\n";
+ 
+                 emit_static_ty(type, p, /*is_proto=*/true);
+-                m_of << " = { .raw = { (uintptr_t)" << linkage_name << " } };";
++                m_of << " = { " << (m_options.c89 ? "" : ".raw = ") << "{ (uintptr_t)" << linkage_name << " } };";
+                 m_of << "\t// static " << p << " : " << type;
+                 m_of << "\n";
+                 return;
+@@ -2524,7 +2688,10 @@ namespace {
+                     // Handled with asm() later
+                     break;
+                 case Compiler::Msvc:
+-                    m_of << "#pragma comment(linker, \"/alternatename:" << Trans_Mangle(p) << "=" << linkage_name << "\")\n";
++                    if( m_options.c89 )
++                        m_of << "#define " << Trans_Mangle(p) << " " << linkage_name << "\n";
++                    else
++                        m_of << "#pragma comment(linker, \"/alternatename:" << Trans_Mangle(p) << "=" << linkage_name << "\")\n";
+                     break;
+                 //case Compiler::Std11:
+                 //    m_of << "#define " << Trans_Mangle(p) << " " << linkage_name << "\n";
+@@ -2568,7 +2735,8 @@ namespace {
+                     m_of << "__attribute__((weak)) ";
+                     break;
+                 case Compiler::Msvc:
+-                    m_of << "__declspec(selectany) ";
++                    if( !m_options.c89 )
++                        m_of << "__declspec(selectany) ";
+                     break;
+                 }
+                 break;
+@@ -2579,7 +2747,8 @@ namespace {
+                     m_of << "__attribute__((weak_import)) ";
+                     break;
+                 case Compiler::Msvc:
+-                    m_of << "__declspec(selectany) ";
++                    if( !m_options.c89 )
++                        m_of << "__declspec(selectany) ";
+                     break;
+                 }
+                 break;
+@@ -2624,7 +2793,7 @@ namespace {
+                 bool is_packed = emit_static_ty(type, p, /*is_proto=*/false);
+                 m_of << " = ";
+ 
+-                m_of << "{ .raw = {";
++                m_of << "{ " << (m_options.c89 ? "" : ".raw = ") << "{";
+                 if( is_packed ) {
+                     DEBUG("encoded.bytes = `" << FMT_CB(ss, for(auto& b: encoded.bytes) ss << std::setw(2) << std::setfill('0') << std::hex << unsigned(b) << (int(&b - encoded.bytes.data()) % 8 == 7 ? " " : "");) << "`");
+                     DEBUG("encoded.relocations = " << encoded.relocations);
+@@ -2672,7 +2841,7 @@ namespace {
+                             ++ reloc_it;
+                         }
+                         else {
+-                            m_of << "0x" << std::hex << v << "ull" << std::dec;
++                            m_of << "0x" << std::hex << v << sfx_ull() << std::dec;
+                         }
+                     }
+                 }
+@@ -2916,6 +3085,12 @@ namespace {
+                 m_mir_res = nullptr;
+                 return ;
+             }
++            else if( item.m_linkage.name != "" && m_compiler == Compiler::Msvc && m_options.c89 )
++            {
++                // No `/alternatename` in old linkers: declare it under its own name
++                m_of << "#define " << Trans_Mangle(p) << " " << item.m_linkage.name << "\n";
++                m_of << "extern ";
++            }
+             else if( item.m_linkage.name != "" && m_compiler == Compiler::Msvc )
+             {
+                 m_of << "#pragma comment(linker, \"/alternatename:" << Trans_Mangle(p) << "=" << item.m_linkage.name << "\")\n";
+@@ -2967,7 +3142,7 @@ namespace {
+             m_of << "// PROTO extern \"" << item.m_abi << "\" " << p << "\n";
+             if( item.m_linkage.name != "" )
+             {
+-                if( item.m_linkage.type == ::HIR::Linkage::Type::Weak && m_compiler == Compiler::Msvc )
++                if( item.m_linkage.type == ::HIR::Linkage::Type::Weak && m_compiler == Compiler::Msvc && !m_options.c89 )
+                 {
+                     // If this function is implementing an external ABI, just rename it (don't bother with per-compiler trickery).
+                     m_of << "#pragma comment(linker, \"/alternatename:" << item.m_linkage.name << "=" << Trans_Mangle(p) << "\")\n";
+@@ -3907,8 +4082,9 @@ namespace {
+                         emit_lvalue(e.dst); m_of << ".DATA[2] = "; emit_param(ve.val);
+                     }
+                     else {
+-                        m_of << "for(unsigned int i = 0; i < " << ve.count << "; i ++)\n";
+-                        m_of << indent << "\t"; emit_lvalue(e.dst); m_of << ".DATA[i] = "; emit_param(ve.val);
++                        // A block around the loop: C89 has no declarations in `for` or after statements
++                        m_of << "{ unsigned int i; for(i = 0; i < " << ve.count << "; i ++)\n";
++                        m_of << indent << "\t"; emit_lvalue(e.dst); m_of << ".DATA[i] = "; emit_param(ve.val); m_of << "; }";
+                     }
+                     }
+                 TU_ARMA(Borrow, ve) {
+@@ -3982,10 +4158,11 @@ namespace {
+                         break;
+                     }
+                     else if( ve.op == ::MIR::eBinOp::MOD && (ty == ::HIR::CoreType::F32 || ty == ::HIR::CoreType::F64) ) {
++                        // Rust's `%` truncates (C's fmod), it is not IEEE `remainder`
+                         if( ty == ::HIR::CoreType::F32 )
+-                            m_of << "remainderf";
++                            m_of << "fmodf";
+                         else
+-                            m_of << "remainder";
++                            m_of << "fmod";
+                         m_of << "("; emit_param(ve.val_l); m_of << ", "; emit_param(ve.val_r); m_of << ")";
+                         break;
+                     }
+@@ -4661,11 +4838,11 @@ namespace {
+                     // Handle signed values
+                     if( is_signed ) {
+                         m_of << static_cast<int64_t>(e.values[odd_arm]);
+-                        m_of << "ll";
++                        m_of << sfx_ll();
+                     }
+                     else {
+                         m_of << e.values[odd_arm];
+-                        m_of << "ull";
++                        m_of << sfx_ull();
+                     }
+                     m_of << ") {"; cb(odd_arm); m_of << "} else {"; cb(odd_arm == 0 ? 1 : 0); m_of << "}\n";
+                     return ;
+@@ -4681,10 +4858,10 @@ namespace {
+                 {
+                     // Handle signed values
+                     if( is_signed ) {
+-                        m_of << indent << "case " << static_cast<int64_t>(e.values[j]) << "ll: ";
++                        m_of << indent << "case " << static_cast<int64_t>(e.values[j]) << sfx_ll() << ": ";
+                     }
+                     else {
+-                        m_of << indent << "case " << e.values[j] << "ull: ";
++                        m_of << indent << "case " << e.values[j] << sfx_ull() << ": ";
+                     }
+                     cb(j);
+                     m_of << "break;\n";
+@@ -4751,7 +4928,7 @@ namespace {
+                 m_of << ") {\n";
+                 for(size_t i = 0; i < ve->size(); i++)
+                 {
+-                    m_of << indent << "\tcase " << (*ve)[i] << "ull: "; cb(i); m_of << " break;\n";
++                    m_of << indent << "\tcase " << (*ve)[i] << sfx_ull() << ": "; cb(i); m_of << " break;\n";
+                 }
+                 m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
+                 m_of << indent << "}\n";
+@@ -4769,7 +4946,7 @@ namespace {
+                     if( (*ve)[i] == INT64_MIN )
+                         m_of << "INT64_MIN";
+                     else
+-                        m_of << (*ve)[i] << "ll";
++                        m_of << (*ve)[i] << sfx_ll();
+                     m_of << ": "; cb(i); m_of << " break;\n";
+                 }
+                 m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
+@@ -6118,6 +6295,14 @@ namespace {
+                 if(ty.data().is_Pointer()) {
+                     m_of << "("; emit_ctype(ty); m_of << ")";
+                 }
++                if( m_options.c89 ) {
++                    // The prelude's `__mrustc_atomic_*` (NT 4.0 has only a 32-bit compare-exchange); one ordering
++                    m_of << "__mrustc_atomic_" << name << get_prim_size(ty) << "(";
++                    if(ty.data().is_Pointer()) {
++                        m_of << "(uintptr_t*)";
++                    }
++                    return ;
++                }
+                 m_of << name;
+                 switch( get_prim_size(params.m_types.at(0)) )
+                 {
+@@ -6299,23 +6484,40 @@ namespace {
+             else if( name == "min_align_of_val" || name == "align_of_val" ) {
+                 emit_lvalue(e.ret_val); m_of << " = ";
+                 const auto& ty = params.m_types.at(0);
++                // C89 has no alignof: mrustc knows the (Rust) alignment
++                auto emit_alignof = [&](const ::HIR::TypeRef& t) {
++                    size_t a = 0;
++                    if( m_options.c89 && get_inner_unsized_type(t) != ::HIR::TypeRef() ) {
++                        // Unsized struct: the alignment of its layout
++                        const auto* repr = Target_GetTypeRepr(sp, m_resolve, t);
++                        MIR_ASSERT(mir_res, repr, "No repr for " << t);
++                        m_of << repr->align;
++                    }
++                    else if( m_options.c89 && Target_GetAlignOf(sp, m_resolve, t, a) ) {
++                        m_of << a;
++                    }
++                    else {
++                        MIR_ASSERT(mir_res, !m_options.c89, "No alignment for " << t);
++                        m_of << "ALIGNOF("; emit_ctype(t); m_of << ")";
++                    }
++                    };
+                 #if 1
+                 auto inner_ty = get_inner_unsized_type(ty);
+                 if( inner_ty == ::HIR::TypeRef() ) {
+-                    m_of << "ALIGNOF("; emit_ctype(ty); m_of << ")";
++                    emit_alignof(ty);
+                 }
+                 else if( const auto* te = inner_ty.data().opt_Slice() ) {
+                     if( ! ty.data().is_Slice() ) {
+-                        m_of << "mrustc_max( ALIGNOF("; emit_ctype(ty); m_of << "), ";
++                        m_of << "mrustc_max( "; emit_alignof(ty); m_of << ", ";
+                     }
+-                    m_of << "ALIGNOF("; emit_ctype(te->inner); m_of << ")";
++                    emit_alignof(te->inner);
+                     if( ! ty.data().is_Slice() ) {
+                         m_of << " )";
+                     }
+                 }
+                 else if( inner_ty == ::HIR::CoreType::Str ) {
+                     if( ! ty.data().is_Primitive() ) {
+-                        m_of << "ALIGNOF("; emit_ctype(ty); m_of << ")";
++                        emit_alignof(ty);
+                     }
+                     else {
+                         m_of << "1";
+@@ -6323,7 +6525,7 @@ namespace {
+                 }
+                 else if( inner_ty.data().is_TraitObject() ) {
+                     if( ! ty.data().is_TraitObject() ) {
+-                        m_of << "mrustc_max( ALIGNOF("; emit_ctype(ty); m_of << "), ";
++                        m_of << "mrustc_max( "; emit_alignof(ty); m_of << ", ";
+                     }
+                     m_of << "((VTABLE_HDR*)"; emit_param(e.args.at(0)); m_of << ".META)->align";
+                     if( ! ty.data().is_TraitObject() ) {
+@@ -6611,7 +6813,8 @@ namespace {
+             else if( name == "caller_location" ) {
+                 //m_of << "abort()";
+                 auto p = m_crate.get_lang_item_path_opt("panic_location");
+-                m_of << "static struct ";
++                // A block around it: C89 has no declarations after statements
++                m_of << "{ static struct ";
+                 if( p == HIR::SimplePath() ) {
+                     m_of << "s_ZRG2cE9core0_0_05panic8Location0g";
+                 }
+@@ -6620,7 +6823,7 @@ namespace {
+                 }
+                 m_of << " mrustc_empty_caller_location = {0,0,{\"\",0}};";
+                 //m_of << " mrustc_empty_caller_location = {{\"\",0},0,0};";  // NOTE: Depends on the generated layout :(
+-                emit_lvalue(e.ret_val); m_of << " = &mrustc_empty_caller_location"; // TODO: Hidden ABI for caller location
++                emit_lvalue(e.ret_val); m_of << " = &mrustc_empty_caller_location; }"; // TODO: Hidden ABI for caller location
+             }
+             // --- Pointer manipulation
+             else if( name == "offset" ) {   // addition, with the reqirement that the resultant pointer be in bounds
+@@ -6938,12 +7141,12 @@ namespace {
+                         m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
+                         break;
+                     case ::HIR::CoreType::I64:
+-                        m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000""00000000ll : 0x7FFFFFFF""FFFFFFFFll)";
++                        m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? (-0x7FFFFFFF""FFFFFFFF" << sfx_ll() << " - 1) : 0x7FFFFFFF""FFFFFFFF" << sfx_ll() << ")";
+                         break;
+                     case ::HIR::CoreType::I128:
+                         if( m_options.emulated_i128 )
+                         {
+-                            m_of << "( (int64_t)("; emit_param(e.args.at(0)); m_of << ".hi) < 0 ? make128s_raw(-0x8000000""00000000ll, 0) : make128s_raw(0x7FFFFFFF""FFFFFFFFll, -1))";
++                            m_of << "( (int64_t)("; emit_param(e.args.at(0)); m_of << ".hi) < 0 ? make128s_raw(0x80000000""00000000" << sfx_ull() << ", 0) : make128s_raw(0x7FFFFFFF""FFFFFFFF" << sfx_ull() << ", -1))";
+                         }
+                         else
+                         {
+@@ -7023,12 +7226,12 @@ namespace {
+                         m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
+                         break;
+                     case ::HIR::CoreType::I64:
+-                        m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000""00000000ll : 0x7FFFFFFF""FFFFFFFFll)";
++                        m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? (-0x7FFFFFFF""FFFFFFFF" << sfx_ll() << " - 1) : 0x7FFFFFFF""FFFFFFFF" << sfx_ll() << ")";
+                         break;
+                     case ::HIR::CoreType::I128:
+                         if( m_options.emulated_i128 )
+                         {
+-                            m_of << "( (int64_t)("; emit_param(e.args.at(0)); m_of << ".hi) < 0 ? make128s_raw(-0x8000000""00000000ll, 0) : make128s_raw(0x7FFFFFFF""FFFFFFFFll, -1))";
++                            m_of << "( (int64_t)("; emit_param(e.args.at(0)); m_of << ".hi) < 0 ? make128s_raw(0x80000000""00000000" << sfx_ull() << ", 0) : make128s_raw(0x7FFFFFFF""FFFFFFFF" << sfx_ull() << ", -1))";
+                         }
+                         else
+                         {
+@@ -8064,7 +8267,7 @@ namespace {
+             case ::HIR::CoreType::I32:
+             case ::HIR::CoreType::I64:
+             case ::HIR::CoreType::Isize:
+-                m_of << static_cast<int64_t>(ve.values[idx]) << "ll";
++                m_of << static_cast<int64_t>(ve.values[idx]) << sfx_ll();
+                 break;
+             case ::HIR::CoreType::Bool:
+             case ::HIR::CoreType::U8:
+@@ -8073,7 +8276,7 @@ namespace {
+             case ::HIR::CoreType::U64:
+             case ::HIR::CoreType::Usize:
+             case ::HIR::CoreType::Char:
+-                m_of << ve.values[idx] << "ull";
++                m_of << ve.values[idx] << sfx_ull();
+                 break;
+             case ::HIR::CoreType::I128: // TODO: Emulation
+             case ::HIR::CoreType::U128: // TODO: Emulation
+@@ -8253,19 +8456,19 @@ namespace {
+                     }
+                     else {
+                         m_of << c.v.truncate_i64();
+-                        m_of << "ll";
++                        m_of << sfx_ll();
+                     }
+                     break;
+                 case ::HIR::CoreType::I128:
+                     if( m_options.emulated_i128 )
+                     {
+-                        m_of << "make128s_raw(" << c.v.get_inner().get_hi() << "ull, " << c.v.get_inner().get_lo() << "ull)";
++                        m_of << "make128s_raw(" << c.v.get_inner().get_hi() << sfx_ull() << ", " << c.v.get_inner().get_lo() << sfx_ull() << ")";
+                     }
+                     else if( c.v.is_i64() && c.v.truncate_i64() != INT64_MIN )
+                     {
+                         m_of << "(int128_t)";
+                         m_of << c.v;
+-                        m_of << "ll";
++                        m_of << sfx_ll();
+                     }
+                     else
+                     {
+@@ -8291,17 +8494,17 @@ namespace {
+                     break;
+                 case ::HIR::CoreType::U64:
+                 case ::HIR::CoreType::Usize:
+-                    m_of << ::std::hex << "0x" << c.v.truncate_u64() << "ull" << ::std::dec;
++                    m_of << ::std::hex << "0x" << c.v.truncate_u64() << sfx_ull() << ::std::dec;
+                     break;
+                 case ::HIR::CoreType::U128:
+                     if( m_options.emulated_i128 )
+                     {
+-                        m_of << "make128_raw(" << c.v.get_hi() << "ull, " << c.v.get_lo() << "ull)";
++                        m_of << "make128_raw(" << c.v.get_hi() << sfx_ull() << ", " << c.v.get_lo() << sfx_ull() << ")";
+                     }
+                     else if( c.v.is_u64() )
+                     {
+                         m_of << "(uint128_t)";
+-                        m_of << ::std::hex << "0x" << c.v << "ull" << ::std::dec;
++                        m_of << ::std::hex << "0x" << c.v << sfx_ull() << ::std::dec;
+                     }
+                     else
+                     {
+diff --git a/src/trans/target.cpp b/src/trans/target.cpp
+index 324601a5..f175eb58 100644
+--- a/src/trans/target.cpp
++++ b/src/trans/target.cpp
+@@ -217,6 +217,11 @@ namespace
+                             check_path_length(key_val, 3);
+                             rv.m_backend_c.m_c_compiler = key_val.value.as_string();
+                         }
++                        else if( key_val.path[2] == "c89" )
++                        {
++                            check_path_length(key_val, 3);
++                            rv.m_backend_c.m_c89 = key_val.value.as_bool();
++                        }
+                         else if( key_val.path[2] == "emulate-i128" )
+                         {
+                             check_path_length(key_val, 3);
+@@ -397,6 +402,7 @@ namespace
+             << "[backend.c]\n"
+             << "variant = \"" << H::c_variant_name(spec.m_backend_c.m_codegen_mode) << "\"\n"
+             << "target = \"" << spec.m_backend_c.m_c_compiler << "\"\n"
++            << (spec.m_backend_c.m_c89 ? "c89 = true\n" : "")
+             << "compiler-opts = ["; for(const auto& s : spec.m_backend_c.m_compiler_opts) of << "\"" << s << "\","; of << "]\n"
+             << "linker-opts-pre = ["; for(const auto& s : spec.m_backend_c.m_linker_opts_pre) of << "\"" << s << "\","; of << "]\n"
+             << "linker-opts-post = ["; for(const auto& s : spec.m_backend_c.m_linker_opts_post) of << "\"" << s << "\","; of << "]\n"
+diff --git a/src/trans/target.hpp b/src/trans/target.hpp
+index 50fa0632..fa77c043 100644
+--- a/src/trans/target.hpp
++++ b/src/trans/target.hpp
+@@ -68,6 +68,10 @@ struct BackendOptsC
+     ::std::vector< ::std::string>   m_compiler_opts;
+     ::std::vector< ::std::string>   m_linker_opts_pre;
+     ::std::vector< ::std::string>   m_linker_opts_post;
++    // `backend.c.c89`: C89 for old Microsoft C (Visual C++ 4.x, for Windows NT 4.0 on Alpha,
++    // MIPS and PowerPC): no `inline`, `long long`, `__alignof`, `__declspec(align|noreturn|selectany)`,
++    // designated initializers or declarations after statements; alignment capped at 8.
++    bool    m_c89 = false;
+ };
+ struct TargetSpec
+ {
