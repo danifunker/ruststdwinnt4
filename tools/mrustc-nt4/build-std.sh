@@ -41,7 +41,8 @@ done
 cp "$here/ntrun-stubs/ntrun-shims.c" "$d/ntrun-shims-$cpu.c"
 ( cd "$d" && ntsdk nt40 "$cpu" cl -nologo -c -W1 $cflags -Fontrun-shims-$cpu.obj ntrun-shims-$cpu.c ) > "$d/ntrun-shims-$cpu.log" 2>&1 \
     || { cat "$d/ntrun-shims-$cpu.log"; exit 1; }
-# (in a folder of their own: the stand-in's import library mustn't replace the SDK's at link)
+# (made in a folder of their own: the stand-in's import library mustn't replace the SDK's at
+# link; only the DLL goes next to the program)
 mkdir -p "$d/ntrun-dlls"
 dlldir=$(win "$d/ntrun-dlls")
 link_run() { # link_run NAME
@@ -54,6 +55,7 @@ link_run() { # link_run NAME
     [ $s = 0 ] || return 1
     for dll in ws2_32 userenv; do
         [ -f "$d/ntrun-dlls/$dll.dll" ] || "$here/ntrun-stubs/mkstub.sh" "$cpu" "$d/$1-$cpu.exe" "$d/ntrun-dlls" $dll || return 1
+        cp "$d/ntrun-dlls/$dll.dll" "$d/"  # ntrun looks next to the program
     done
     ( cd "$d" && ntsdk nt40 "$cpu" sh -c 'NTRUN_DLLPATH="$1;$NTRUN_DLLPATH" exec ntrun $2-$3.exe' sh "$dlldir" "$1" "$cpu" ) 2>&1 \
         | tee "$d/run-$1-$cpu.log"

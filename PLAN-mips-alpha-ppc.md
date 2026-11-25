@@ -314,7 +314,41 @@ carries for that), then with the real compiler in CI.
   the rest in about a second; hello.exe is 2.3 MB (`cl` without optimization flags so far).
   In the std build (`debug_assertions`, as minicargo builds it): core 284 s, std (38 MB of
   C) 177 s, the peak 363 MB, compiler_builtins 42 s, stdtest 54 s.
-- **std and stdtest**: RESULT_STD
+- **std**: std and its 13 dependencies translate with mrustc (minicargo, about 25 s on the
+  Mac) and compile with Visual C++ 4.1 (`-QAieee1`: without it a comparison with a NaN
+  traps, c0000090); stdtest and stdsmoke link (4.4 to 4.6 MB). **`tools/mrustc-nt4/stdsmoke.rs`
+  passes on Alpha under `ntrun`** (run 45714170104): threads and `Mutex`, `Condvar`,
+  `RwLock`, channels, `Once`, park, thread-locals, files, the environment and arguments,
+  time and sleep, formatting and collections, float maths: "stdsmoke: ok".
+- **stdtest does not run under `ntrun`**: that's the blocker, and it is `ntrun`'s, not the
+  build's. `ntrun` (made to run the SDK's tools) lacks about 35 of the functions std calls:
+  KERNEL32's `CreateNamedPipeW`, `ReadFileEx`, `WriteFileEx`, `GetOverlappedResult`,
+  `CancelIo`, `WaitForSingleObjectEx`, `SleepEx`, `SwitchToThread`, `FindFirstFileExW`,
+  `MoveFileExW`, `CopyFileExW`, `LockFileEx`, `DeviceIoControl`, `GetSystemDirectoryW`,
+  `GetWindowsDirectoryW`, `QueryDosDeviceW`, `SetHandleInformation`, `SetWaitableTimer`,
+  `GetProcessTimes`, `GetThreadTimes`, NT 4.0's `InterlockedCompareExchange`; ADVAPI32's
+  `RegCreateKeyExW`, `RegSetValueExW`; NTDLL's `NtCreateFile`, `NtOpenFile`, `NtReadFile`,
+  `NtWriteFile`, `NtQueryDirectoryFile`, `NtQueryInformationFile`, `NtSetInformationFile`,
+  `NtCreateNamedPipeFile`, `NtQueryObject`, `NtQueryInformationProcess`,
+  `NtQuerySystemInformation`, `RtlDosPathNameToNtPathName_U`, `RtlUpcaseUnicodeChar`; and it
+  has no sockets (no WS2_32.DLL) and no USERENV.DLL. Its process check needs pipes, its
+  file check directory listings, its network check sockets. For the runs here,
+  `tools/mrustc-nt4/ntrun-stubs/` has stand-in DLLs (WS2_32, USERENV) and `ntrun-shims.c`
+  (NtWriteFile, NtReadFile, SwitchToThread, the `*DirectoryW` calls, made of functions
+  ntrun has), linked into the test programs only; mrustc's atomics take a lock with
+  `InterlockedExchange` rather than use `InterlockedCompareExchange`. STDTEST_RUN
+
+### Next
+
+- stdtest on a real NT 4.0 for Alpha: the ES40 emulator and the NT 4.0 image on the NAS
+  (nothing set up yet), or `ntrun` grown by the functions above (tenox7's project).
+- Push mrustc's `alpha-nt4` branch to the fork (CI then uses it instead of the patch).
+- A driver for vintrdp's crates (minicargo with the target and `wrap/mrustc`, as
+  `translate-std.sh` does for std), optimization (`cl` runs without `-Ox` so far; core
+  takes 160 to 280 s as it is), and no LIBC.LIB if its start-up code shouldn't ship.
+- MIPS: the same C (byte for byte), so `targets/mips-nt4.toml` plus import libraries and
+  the CRT's helpers. PowerPC: an arch name that keeps core's AltiVec out.
+
 
 ## The MIPS shortcut: rustc with COFF objects (to investigate)
 
