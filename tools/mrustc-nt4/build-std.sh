@@ -2,9 +2,9 @@
 # build-std.sh CPU DIR: compile translate-std.sh's C in DIR (std, its dependencies and
 # stdtest) with Visual C++ 4.1 for CPU, link stdtest.exe and run it with ntrun. Runs inside
 # the tenox7/ntsdk image. Like build.sh: the time and peak memory of each cl, diagnostics in
-# DIR/*-CPU.log. Import libraries: the NT 4.0 SDK's, and ntdll's (which the SDK lacks) made
-# from imports/arm/ntdll.def (the names are Alpha's too: gen-defs.py made it from the Alpha
-# CD's alphadef.src).
+# DIR/*-CPU.log. Import libraries: the NT 4.0 SDK's, and ntdll's and userenv's (which the
+# SDK lacks) made from imports/arm/*.def: NT 4.0's export lists, the same names on Alpha
+# (ntdll's came from the Alpha CD's alphadef.src).
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 win() { printf 'Z:%s' "$(cd "$1" && pwd | tr / '\\')"; }
@@ -24,12 +24,14 @@ for c in "$d"/*.c; do
     objs="$objs $n-$cpu.obj"
 done
 [ $rc = 0 ] || exit 1
-cp "$repo/imports/arm/ntdll.def" "$d/ntdll-$cpu.def"
-( cd "$d" && ntsdk nt40 "$cpu" lib -nologo -machine:$cpu -def:ntdll-$cpu.def -out:ntdll-$cpu.lib ) > "$d/lib-$cpu.log" 2>&1 \
-    || { cat "$d/lib-$cpu.log"; exit 1; }
+for dll in ntdll userenv; do
+    cp "$repo/imports/arm/$dll.def" "$d/$dll-$cpu.def"
+    ( cd "$d" && ntsdk nt40 "$cpu" lib -nologo -machine:$cpu -def:$dll-$cpu.def -out:$dll-$cpu.lib ) > "$d/lib-$cpu.log" 2>&1 \
+        || { cat "$d/lib-$cpu.log"; exit 1; }
+done
 start=$(date +%s)
 ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:stdtest-$cpu.exe -subsystem:console $objs \
-    kernel32.lib advapi32.lib ws2_32.lib userenv.lib ntdll-$cpu.lib ) > "$d/link-$cpu.log" 2>&1
+    kernel32.lib advapi32.lib ws2_32.lib userenv-$cpu.lib ntdll-$cpu.lib ) > "$d/link-$cpu.log" 2>&1
 s=$?
 echo "link ($cpu): exit $s, $(( $(date +%s) - start )) s, $(wc -c < "$d/stdtest-$cpu.exe" 2>/dev/null || echo no) bytes"
 head -80 "$d/link-$cpu.log"
