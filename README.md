@@ -3,7 +3,7 @@
 A Rust runtime, and later a `std` port, for Windows NT 4.0 SP0. The first target is
 [PINT](https://github.com/tenox7/PINT), NT 4.0 on 32-bit ARM (the Raspberry Pi 2, 3 and 4);
 x86 NT 4.0 (`i686-nt4-windows-msvc`) is the second. Built with Rust 1.90, the version mrustc can bootstrap, so the same
-patches can later reach Alpha and PowerPC through mrustc.
+patches can later reach MIPS, Alpha and PowerPC through mrustc (see `PLAN-mips-alpha-ppc.md`).
 
 Status: layers 0 to 3, for PINT and x86. `std` programs run on PINT and x86 NT 4.0: threads and locks,
 thread-locals, files and directories, processes with pipes, TCP and name resolution, time,
