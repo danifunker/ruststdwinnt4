@@ -8,12 +8,15 @@ here=$(cd "$(dirname "$0")" && pwd)
 win() { printf 'Z:%s' "$(cd "$1" && pwd | tr / '\\')"; }
 inc=$(win "$here/include")
 cpu=$1 d=$2
+# Alpha: IEEE floating point (NaN, infinities, division by zero) without traps, as Rust needs:
+# without it, a comparison with a NaN raises c0000090 (probe: tools/ntsdk-spike/probes/nan.c)
+case $cpu in alpha) cflags=-QAieee1 ;; *) cflags= ;; esac
 peak() { cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo "?"; }
 rc=0
 for n in libcore.rlib liballoc.rlib libnt4rt.rlib hello.exe; do
     start=$(date +%s)
-    ntsdk nt40 "$cpu" sh -c 'INCLUDE="$2;$INCLUDE" exec cl -nologo -c -W1 -Fo"$0" "$1"' \
-        "$d/$n-$cpu.obj" "$d/$n.c" "$inc" > "$d/$n-cl-$cpu.log" 2>&1
+    ntsdk nt40 "$cpu" sh -c 'INCLUDE="$2;$INCLUDE" exec cl -nologo -c -W1 $3 -Fo"$0" "$1"' \
+        "$d/$n-$cpu.obj" "$d/$n.c" "$inc" "$cflags" > "$d/$n-cl-$cpu.log" 2>&1
     s=$?
     echo "cl $n.c ($cpu): exit $s, $(( $(date +%s) - start )) s, $(wc -c < "$d/$n.c") bytes of C, container peak memory $(peak) bytes, object $(wc -c < "$d/$n-$cpu.obj" 2>/dev/null || echo none)"
     grep -E 'error|fatal' "$d/$n-cl-$cpu.log" | head -40
