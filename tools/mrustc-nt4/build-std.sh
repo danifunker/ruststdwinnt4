@@ -47,7 +47,7 @@ mkdir -p "$d/ntrun-dlls"
 dlldir=$(win "$d/ntrun-dlls")
 link_run() { # link_run NAME
     start=$(date +%s)
-    ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:$1-$cpu.exe -subsystem:console $1.exe-$cpu.obj ntrun-shims-$cpu.obj $objs \
+    ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:$1-$cpu.exe -map:$1-$cpu.map -subsystem:console $1.exe-$cpu.obj ntrun-shims-$cpu.obj $objs \
         kernel32.lib advapi32.lib ws2_32.lib userenv-$cpu.lib ntdll-$cpu.lib ) > "$d/link-$1-$cpu.log" 2>&1
     s=$?
     echo "link $1 ($cpu): exit $s, $(( $(date +%s) - start )) s, $(wc -c < "$d/$1-$cpu.exe" 2>/dev/null || echo no) bytes"
@@ -60,6 +60,12 @@ link_run() { # link_run NAME
     ( cd "$d" && ntsdk nt40 "$cpu" sh -c 'NTRUN_DLLPATH="$1;$NTRUN_DLLPATH" exec ntrun $2-$3.exe' sh "$dlldir" "$1" "$cpu" ) 2>&1 \
         | tee "$d/run-$1-$cpu.log"
 }
+# For a real NT 4.0: the same programs without the shims (and with a map, for crash reports)
+for n in stdsmoke stdtest; do
+    ( cd "$d" && ntsdk nt40 "$cpu" link -nologo -out:$n-$cpu-nt4.exe -map:$n-$cpu-nt4.map -subsystem:console \
+        $n.exe-$cpu.obj $objs kernel32.lib advapi32.lib ws2_32.lib userenv-$cpu.lib ntdll-$cpu.lib ) \
+        > "$d/link-$n-nt4-$cpu.log" 2>&1 || { cat "$d/link-$n-nt4-$cpu.log"; exit 1; }
+done
 link_run stdsmoke || exit 1
 grep -q '^stdsmoke: ok' "$d/run-stdsmoke-$cpu.log" || exit 1
 link_run stdtest || exit 1

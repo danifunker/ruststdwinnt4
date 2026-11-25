@@ -207,3 +207,4 @@ jobs:
           path: |
             out-std/*.log
             out-std/*.exe
+            out-std/*.map

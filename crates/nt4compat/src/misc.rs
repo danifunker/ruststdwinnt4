@@ -205,6 +205,8 @@ unsafe extern "system" fn unhandled(pointers: *mut c_void) -> i32 {
     const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
     // SAFETY: the pointers were stored from handlers of this type.
     unsafe {
+        #[cfg(all(rust_compiler = "mrustc", target_arch = "alpha"))]
+        crate::crash::report(pointers);
         let h = HANDLER.load(Ordering::Acquire);
         if !h.is_null() {
             let r = core::mem::transmute::<*mut c_void, Handler>(h)(pointers);

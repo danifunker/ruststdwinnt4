@@ -29,6 +29,8 @@ mod sys;
 #[cfg(not(rust_compiler = "mrustc"))]
 pub mod crt;
 pub mod file;
+#[cfg(all(rust_compiler = "mrustc", target_arch = "alpha"))]
+mod crash;
 pub mod misc;
 pub mod net;
 pub mod random;
