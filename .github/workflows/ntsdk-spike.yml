@@ -1,0 +1,101 @@
+# The ntsdk spike (PLAN-mips-alpha-ppc.md): Visual C++ 4.1 for MIPS, Alpha and PowerPC from
+# the tenox7/ntsdk image, pulled at run time (none of Microsoft's files are in this repository).
+name: ntsdk spike
+
+on:
+  push:
+    branches: [ntsdk-spike]
+  workflow_dispatch:
+
+env:
+  MRUSTC_REPO: danifunker/mrustc
+  MRUSTC_REF: eb5df108a30cd33210e1ef2fd0b68e2dd143f65e
+
+jobs:
+  # Step 1: hello.c built and run with ntrun on each CPU; then the one-feature probes.
+  ntsdk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker pull tenox7/ntsdk
+      - name: hello.c on MIPS, Alpha and PowerPC
+        run: |
+          docker run --rm -v "$PWD":/src tenox7/ntsdk sh -c '
+            cd tools/ntsdk-spike && rc=0
+            for c in mips alpha ppc; do
+              if ntsdk nt40 $c cl -nologo -Fehello-$c.exe hello.c && ntsdk nt40 $c ntrun hello-$c.exe a b; then
+                echo "$c: pass"
+              else
+                echo "$c: FAIL"; rc=1
+              fi
+            done
+            exit $rc'
+      - name: Probes
+        if: always()
+        run: docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/probe.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probes
+          path: tools/ntsdk-spike/probe-out
+
+  # mrustc's C for core, alloc, nt4rt and hello (MIPS and Alpha share it; PowerPC has its own).
+  mrustc-c:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MRUSTC_REPO }}
+          ref: ${{ env.MRUSTC_REF }}
+          path: mrustc
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: mrustc/bin/mrustc
+          key: mrustc-${{ env.MRUSTC_REF }}-ubuntu-24.04
+      - name: Build mrustc
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zlib1g-dev
+          make -C mrustc -j"$(nproc)" bin/mrustc
+      - name: Rust 1.90's library sources
+        run: rustup toolchain install 1.90.0 --profile minimal --component rust-src
+      - name: Translate
+        run: |
+          export LIBRARY="$(rustc +1.90.0 --print sysroot)/lib/rustlib/src/rust/library"
+          for t in mips-nt4-msvc powerpc-nt4-msvc; do
+            tools/ntsdk-spike/mrustc-c.sh $t "$PWD/mrustc/bin/mrustc"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mrustc-c
+          path: out-*/*.c
+
+  # Step 2: that C through cl, per CPU. hello first (smallest), core last (30 MB).
+  compile:
+    needs: mrustc-c
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [mips, alpha, ppc]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mrustc-c
+      - run: docker pull tenox7/ntsdk
+      - name: cl on mrustc's C
+        run: |
+          case ${{ matrix.cpu }} in ppc) d=out-powerpc-nt4-msvc ;; *) d=out-mips-nt4-msvc ;; esac
+          docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/compile-c.sh ${{ matrix.cpu }} \
+            $d/hello.exe.c $d/libnt4rt.rlib.c $d/liballoc.rlib.c $d/libcore.rlib.c | tee summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cl-${{ matrix.cpu }}
+          path: |
+            summary.txt
+            out-*/*.log
