@@ -5,6 +5,19 @@ Status: **parked**. PINT (ARM) and x86 are done. Nothing here has been built or 
 - 2026-11-08: plan written for Alpha and PowerPC.
 - 2026-11-25: `tenox7/ntsdk` appeared and changes the toolchain side: Microsoft's own C
   compilers for all three, run on Linux or macOS with no VM. MIPS added.
+- 2026-11-25: FX!32 dropped: every CPU gets a native build. That makes mrustc the main
+  path, since it is the only one that reaches Alpha and PowerPC.
+
+## Shape
+
+1. **mrustc to C89, compiled by ntsdk** is the path for all three. Its work (a C89 mode
+   in mrustc, a build driver) is shared; each CPU then adds a target definition, import
+   lists, start-up code and helpers.
+2. **The MIPS shortcut** (rustc's `mipsel` objects converted to COFF) is optional. It is
+   worth taking only if it is cheap and proves out before the mrustc work is done, or if
+   mrustc's output is too slow or too big for Visual C++ 4.1 on MIPS.
+3. **Order of CPUs** once mrustc works: PowerPC or MIPS first (32-bit, simplest), Alpha
+   last (32-bit pointers in 64-bit registers, the most unusual ABI).
 
 ## Why not the ARM and x86 way
 
@@ -15,7 +28,7 @@ rustc cannot produce code for any of the three:
   little-endian PE/COFF, and does not use NT's calling convention.
 - **MIPS**: LLVM has little-endian 32-bit MIPS (`mipsel`), and NT's MIPS calling
   convention is close to o32, but LLVM writes only ELF for MIPS, not COFF. Unlike the
-  other two, there is a possible native-rustc route (Path 3), still unproven.
+  other two, there is a possible native-rustc route (the MIPS shortcut), still unproven.
 
 ## What is at hand
 
@@ -35,7 +48,8 @@ rustc cannot produce code for any of the three:
     (Administrator's password is `password`). The rustdesk repository's `crustdesk-winnt`
     has `scripts/ntx.py` and `tools/nt/ntexec.c` for sending files and running programs.
   - Alpha: the ES40 emulator (`DEC-Alpha/NT4 Apps/es40.zip`) and an NT 4.0 disk image
-    (`DEC-Alpha/NT4_2GB.img`) on the NAS; nothing set up yet.
+    (`DEC-Alpha/NT4_2GB.img`) on the NAS; nothing set up yet. Needed only for GUI
+    programs: `ntrun` runs Alpha console programs.
   - MIPS: none yet (MAME's MIPS Magnum/Jazz is a candidate).
 - The native compilers on the NAS (`DEC-Alpha/NT4 Apps/msvc60pro_en-us_alpha.iso`,
   `IBMPowerPC/Windows PPC/msvc-4.1-ppc.iso`, copied to
@@ -44,29 +58,7 @@ rustc cannot produce code for any of the three:
 - mrustc (`~/repos/mrustc`, the user's fork) translates Rust 1.90 to C and has been used
   for PowerPC Mac and SPARC Solaris.
 
-## Path 1: FX!32 on Alpha (cheapest; try first for Alpha)
-
-DEC's FX!32 runs x86 Win32 programs on NT 4.0 for Alpha, translating x86 code and
-calling Alpha NT's own DLLs for Win32 functions. The x86 target's programs (and
-vintrdp-nt4-x86.exe) might run unchanged. Not native, and there is nothing like it for
-MIPS or PowerPC. Needs the ES40 machine: ntrun runs Alpha programs, not FX!32.
-
-What may break, to check on a first run (`hello`, `stdtest`, `cmix`, `tlstest`):
-
-- NTDLL's x86-only exports: x86 programs import `_alldiv`, `_aulldiv`, `_allrem`,
-  `_aullrem`, `_allmul`, the shifts and `_chkstk` from NTDLL, which Alpha's NTDLL does not
-  have. If FX!32 does not supply them, nt4compat can carry its own (an x86 build option).
-- nt4compat's direct NTDLL calls (`NtQueryInformationFile`, `NtQueryDirectoryFile`,
-  `NtSetInformationFile`, `RtlDosPathNameToNtPathName_U`...): FX!32 may only map the
-  documented Win32 functions.
-- `cmpxchg8b` (Rust's 64-bit atomics on i686) and x87 precision (FX!32 computes in 64-bit,
-  not 80-bit).
-- The static TLS directory and its callbacks.
-
-Steps: set up ES40 with NT 4.0 for Alpha and FX!32 (find FX!32 in the collection), add an
-Alpha variant of `tests/x86/run-exe.sh`, run the x86 programs, fix what breaks.
-
-## Path 2: mrustc with C89 output (native; all three)
+## The main path: mrustc with C89 output (all three)
 
 mrustc needs no exceptions: it implements panics with `setjmp`/`longjmp`, and these
 targets abort on panic anyway. What Visual C++ 4.1 lacks is C99. Counted in a GCC-mode
@@ -100,7 +92,7 @@ Steps:
 Risks: Visual C++ 4.1 on multi-megabyte generated files (limits, bugs, 64-bit
 arithmetic); mrustc's own coverage of the crates vintrdp needs.
 
-## Path 3: rustc for MIPS, with COFF objects (native; MIPS only; to investigate)
+## The MIPS shortcut: rustc with COFF objects (to investigate)
 
 rustc's `mipsel` code generation is mature. If its ELF objects can become NT COFF
 objects, MIPS could work like x86 and ARM: rustc, our import libraries, a linker.
@@ -122,6 +114,8 @@ the C99 layer, or ship without TLS first.
 
 ## Ruled out
 
+- **FX!32 on Alpha** (running the x86 build under DEC's translator): the user wants
+  native builds only (2026-11-25).
 - **GCC**: on Alpha it only has 64-bit pointers (NT uses 32-bit ones); on PowerPC its
   little-endian ABI is System V, not NT's (NT support ended with GCC 2.x); both would need
   ELF objects converted to COFF.
