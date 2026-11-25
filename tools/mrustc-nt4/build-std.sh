@@ -36,8 +36,11 @@ s=$?
 echo "link ($cpu): exit $s, $(( $(date +%s) - start )) s, $(wc -c < "$d/stdtest-$cpu.exe" 2>/dev/null || echo no) bytes"
 head -80 "$d/link-$cpu.log"
 [ $s = 0 ] || exit 1
-# ntrun has no sockets and no WS2_32.DLL: a stand-in next to the program, for this run
-"$here/ntrun-ws2_32/mkstub.sh" "$cpu" "$d/stdtest-$cpu.exe" "$d" || exit 1
+# ntrun has no sockets (no WS2_32.DLL) and no USERENV.DLL: stand-ins next to the program, for
+# this run
+for dll in ws2_32 userenv; do
+    "$here/ntrun-stubs/mkstub.sh" "$cpu" "$d/stdtest-$cpu.exe" "$d" $dll || exit 1
+done
 dll=$(win "$d")
 ( cd "$d" && ntsdk nt40 "$cpu" sh -c 'NTRUN_DLLPATH="$1;$NTRUN_DLLPATH" exec ntrun stdtest-$2.exe' sh "$dll" "$cpu" ) 2>&1 \
     | tee "$d/run-$cpu.log"
