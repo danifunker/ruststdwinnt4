@@ -267,8 +267,10 @@ Not the full mode the spike estimated (3 to 5 weeks), the parts Alpha needed:
   explicit padding keeps the sizes mrustc computed (`SliceArcInnerForStatic` is 16), and a
   zero-length `uint64_t` array gives such a struct the C alignment the padding assumes.
   Weak statics (vtables) are `static` in each object file; typeids are communal.
-- Atomics on NT 4.0's only one, kernel32's 32-bit `InterlockedCompareExchange`:
-  compare-exchange loops, 8 and 16 bits on the aligned word, 64 bits under one lock.
+- Atomics: one 32-bit compare-exchange under a program-wide lock taken with kernel32's
+  `InterlockedExchange` (yielding with `Sleep(0)`), called through their `__imp_` pointers;
+  everything else is compare-exchange loops, 8 and 16 bits on the aligned word, 64 bits under
+  a second lock. Not NT 4.0's `InterlockedCompareExchange`: `ntrun` doesn't have it.
 - Float-to-integer `as` saturates through helpers: Alpha's conversion traps out of range
   (`hello` stopped with c0000090 on `1e19 as u64` before).
 - No passing of 8-aligned arguments by pointer (an MSVC x86 workaround that broke the C ABI
