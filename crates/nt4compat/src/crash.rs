@@ -9,6 +9,8 @@ use core::ffi::c_void;
 extern "system" {
     fn GetStdHandle(n: u32) -> *mut c_void;
     fn WriteFile(h: *mut c_void, buf: *const u8, len: u32, written: *mut u32, ov: *mut c_void) -> i32;
+    fn VirtualQuery(address: *const c_void, info: *mut u32, length: usize) -> usize;
+    fn IsBadReadPtr(p: *const c_void, n: usize) -> i32;
 }
 
 struct Out {
@@ -53,8 +55,10 @@ pub unsafe fn report(pointers: *mut c_void) {
         o.s(" at ");
         o.hex(*(rec.add(12) as *const u32) as u64, 8);
         let n = *(rec.add(16) as *const u32);
-        o.s(", parameters");
-        for i in 0..n.min(4) {
+        o.s(", ");
+        o.hex(n as u64, 2);
+        o.s(" parameters");
+        for i in 0..n.min(6) {
             o.s(" ");
             o.hex(*(rec.add(20 + 4 * i as usize) as *const u32) as u64, 8);
         }
@@ -71,6 +75,30 @@ pub unsafe fn report(pointers: *mut c_void) {
         o.hex(int(17), 8);
         o.s(" v0 ");
         o.hex(int(0), 8);
+        // The faulting page (MEMORY_BASIC_INFORMATION: base, allocation base, allocation
+        // protection, region size, state, protection, type) and the instruction there
+        let fir = *(ctx.add(528) as *const u64) as usize;
+        let mut mbi = [0u32; 7];
+        if VirtualQuery(fir as *const c_void, mbi.as_mut_ptr(), 28) != 0 {
+            o.s("\r\n    page: base ");
+            o.hex(mbi[0] as u64, 8);
+            o.s(" alloc ");
+            o.hex(mbi[1] as u64, 8);
+            o.s(" size ");
+            o.hex(mbi[3] as u64, 8);
+            o.s(" state ");
+            o.hex(mbi[4] as u64, 5);
+            o.s(" protect ");
+            o.hex(mbi[5] as u64, 3);
+            o.s(" type ");
+            o.hex(mbi[6] as u64, 7);
+        }
+        if IsBadReadPtr(fir as *const c_void, 4) == 0 {
+            o.s(" word ");
+            o.hex(*(fir as *const u32) as u64, 8);
+        } else {
+            o.s(" unreadable");
+        }
         o.s("\r\n    stack:");
         let sp = int(30) as usize as *const u32;
         if !sp.is_null() {
