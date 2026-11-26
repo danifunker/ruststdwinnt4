@@ -41,6 +41,11 @@ jobs:
               grep -i "warning\|ignor" cl.log | head -2
               ntsdk nt40 alpha ntrun nan.exe 2>&1 | tail -4
             done'
+      - name: CreateThread on Alpha (for real machines)
+        if: always()
+        run: |
+          docker run --rm -v "$PWD":/src tenox7/ntsdk sh -c '
+            cd tools/ntsdk-spike/probes && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread-alpha.exe thread.c && ntsdk nt40 alpha ntrun thread-alpha.exe'
       - name: Probes
         if: always()
         run: docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/probe.sh
@@ -48,7 +53,9 @@ jobs:
         if: always()
         with:
           name: probes
-          path: tools/ntsdk-spike/probe-out
+          path: |
+            tools/ntsdk-spike/probe-out
+            tools/ntsdk-spike/probes/*.exe
 
   # mrustc's C for core, alloc, nt4rt and hello (MIPS and Alpha share it; PowerPC has its own).
   # The spike's measurements of mrustc's unchanged C: run by hand only.
