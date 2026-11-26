@@ -266,6 +266,23 @@ diff -ruN a/library/std/src/sys/stdio/windows.rs b/library/std/src/sys/stdio/win
  fn is_utf8_console() -> bool {
      // Windows 7 has a fun "feature" where WriteFile on a console handle will return
      // the number of UTF-16 code units written and not the number of bytes from the input string.
+@@ -197,9 +197,15 @@
+     let utf16: &[u16] = unsafe {
+         // Note that this theoretically checks validity twice in the (most common) case
+         // where the underlying byte sequence is valid utf-8 (given the check in `write()`).
++        // Windows NT 4.0 (vendor nt4) takes no flags with CP_UTF8 (MB_ERR_INVALID_CHARS came in
++        // XP) and fails the call; `utf8` is valid UTF-8 already.
++        #[cfg(target_vendor = "nt4")]
++        let flags = 0;
++        #[cfg(not(target_vendor = "nt4"))]
++        let flags = c::MB_ERR_INVALID_CHARS;
+         let result = c::MultiByteToWideChar(
+             c::CP_UTF8,                          // CodePage
+-            c::MB_ERR_INVALID_CHARS,             // dwFlags
++            flags,                               // dwFlags
+             utf8.as_ptr(),                       // lpMultiByteStr
+             utf8.len() as i32,                   // cbMultiByte
+             utf16.as_mut_ptr() as *mut c::WCHAR, // lpWideCharStr
 diff -ruN a/library/windows_targets/src/lib.rs b/library/windows_targets/src/lib.rs
 --- a/library/windows_targets/src/lib.rs
 +++ b/library/windows_targets/src/lib.rs

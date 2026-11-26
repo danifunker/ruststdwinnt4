@@ -22,7 +22,7 @@ case ${1:-} in
         mkdir -p "$(dirname "$PATCH")"
         # Without the files' times in the headers, so the same edit gives the same patch.
         { (cd "$W" && diff -ruN a/library b/library) || [ $? -eq 1 ]; } \
-            | sed -E 's/^(---|\+\+\+) ([^\t]+)\t.*/\1 \2/' > "$PATCH"
+            | sed -E $'s/^(---|\\+\\+\\+) ([^\t]+)\t.*/\\1 \\2/' > "$PATCH"
         echo "$PATCH: $(grep -c '^+++' "$PATCH") files" ;;
     *) echo "usage: $0 open|save" >&2; exit 2 ;;
 esac
