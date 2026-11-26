@@ -145,11 +145,15 @@ pub unsafe fn report(pointers: *mut c_void) {
 // trampoline, which reports and then calls the real routine.
 type StartRoutine = unsafe extern "system" fn(*mut c_void) -> u32;
 
+type CreateThreadFn = unsafe extern "system" fn(
+    *mut c_void, usize, Option<StartRoutine>, *mut c_void, u32, *mut u32,
+) -> *mut c_void;
+
+#[link(name = "kernel32")]
 extern "system" {
-    #[link_name = "__imp_CreateThread"]
-    static REAL_CREATE_THREAD: unsafe extern "system" fn(
-        *mut c_void, usize, Option<StartRoutine>, *mut c_void, u32, *mut u32,
-    ) -> *mut c_void;
+    // (the same prototypes as random.rs's: one C prototype per name)
+    fn GetProcAddress(m: crate::sys::HANDLE, name: *const u8) -> *const c_void;
+    fn LoadLibraryA(name: *const u8) -> crate::sys::HANDLE;
     fn HeapAlloc(heap: *mut c_void, flags: u32, size: usize) -> *mut c_void;
     fn GetProcessHeap() -> *mut c_void;
 }
@@ -190,7 +194,10 @@ unsafe extern "system" fn create_thread(
         *b = start.map_or(0, |f| f as usize);
         *b.add(1) = param as usize;
         note("CreateThread: stack, flags", stack, flags as usize);
-        let h = REAL_CREATE_THREAD(sa, stack, Some(trampoline), b as *mut c_void, flags, id);
+        // kernel32's own (the import library's member would bring a second CreateThread)
+        let real = GetProcAddress(LoadLibraryA(b"kernel32.dll\0".as_ptr()), b"CreateThread\0".as_ptr());
+        let real = core::mem::transmute::<*const c_void, CreateThreadFn>(real);
+        let h = real(sa, stack, Some(trampoline), b as *mut c_void, flags, id);
         note("CreateThread: handle, routine", h as usize, *b);
         h
     }
