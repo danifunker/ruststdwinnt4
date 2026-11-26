@@ -115,11 +115,14 @@ pub unsafe fn report(pointers: *mut c_void) {
         o.s("\r\n    code addresses up the stack:");
         let mut found = 0;
         let mut i = 0usize;
-        while !sp.is_null() && found < 60 && i < 65536 {
+        // (within the stack's region: VirtualQuery gives where it ends)
+        let mut end = sp as usize;
+        let mut smbi = [0u32; 7];
+        if !sp.is_null() && VirtualQuery(sp as *const c_void, smbi.as_mut_ptr(), 28) != 0 {
+            end = smbi[0] as usize + smbi[3] as usize;
+        }
+        while (sp.add(i) as usize) + 4 <= end && found < 60 && i < 65536 {
             let a = sp.add(i);
-            if IsBadReadPtr(a as *const c_void, 4) != 0 {
-                break;
-            }
             let v = *a;
             if (0x0040_1000..0x0080_0000).contains(&v) && v & 3 == 0 {
                 if found % 8 == 0 {
