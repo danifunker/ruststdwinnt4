@@ -1,17 +1,25 @@
 /* Does a new thread start in code on a page nothing has run yet? (std's thread_start on Alpha
- * faulted on its first instruction.) run_far is ~100 KB of code past main. */
+ * faulted on its first instruction.) run_far is ~100 KB of code past main; four threads start into it at once. */
 #include <windows.h>
 #include <stdio.h>
 DWORD WINAPI run_far(void *p);
 int main(void) {
     DWORD code = 0, id;
-    HANDLE h;
     printf("main at %p, run_far at %p\n", (void *)main, (void *)run_far); fflush(stdout);
-    h = CreateThread(0, 2097152, run_far, (void *)7, 0x10000, &id);
-    if (!h) { printf("CreateThread failed %lu\n", GetLastError()); return 1; }
-    WaitForSingleObject(h, INFINITE);
-    GetExitCodeThread(h, &code);
-    printf("exit %lx\nthread2: done\n", code);
+    {
+        HANDLE hs[4];
+        int i;
+        for (i = 0; i < 4; i++) {
+            hs[i] = CreateThread(0, 2097152, run_far, (void *)(i + 7), 0x10000, &id);
+            if (!hs[i]) { printf("CreateThread failed %lu\n", GetLastError()); return 1; }
+        }
+        for (i = 0; i < 4; i++) {
+            WaitForSingleObject(hs[i], INFINITE);
+            GetExitCodeThread(hs[i], &code);
+            printf("exit %lx\n", code);
+        }
+    }
+    printf("thread2: done\n");
     return 0;
 }
 int fill0(int x) { return (x * 3) ^ (x >> 1) + 0; }
