@@ -82,7 +82,7 @@ index 66c462ba..193bd4b1 100644
                          e->src = ::MIR::RValue::make_Constant( ::MIR::Constant::make_ItemAddr({ box$(se.val.m_root.as_Static()) }) );
                          changed = true;
 diff --git a/src/trans/codegen_c.cpp b/src/trans/codegen_c.cpp
-index 6d076cc5..5a70d61d 100644
+index 6d076cc5..ccbeca49 100644
 --- a/src/trans/codegen_c.cpp
 +++ b/src/trans/codegen_c.cpp
 @@ -259,10 +259,39 @@ namespace {
@@ -731,7 +731,20 @@ index 6d076cc5..5a70d61d 100644
                      break;
                  //case Compiler::Std11:
                  //    m_of << "#define " << Trans_Mangle(p) << " " << linkage_name << "\n";
-@@ -2568,7 +2869,9 @@ namespace {
+@@ -2555,6 +2856,12 @@ namespace {
+ 
+             TRACE_FUNCTION_F(p);
+             auto type = params.monomorph(m_resolve, item.m_type);
++            // C89: a static with a link name (#[no_mangle], #[export_name]) is defined under it
++            // (_tls_used, _tls_index...), the way functions are
++            if( m_options.c89 && item.m_linkage.name != "" && item.m_linkage.name[0] != '\1' )
++            {
++                m_of << "#define " << Trans_Mangle(p) << " " << item.m_linkage.name << "\n";
++            }
+             switch(item.m_linkage.type)
+             {
+             case HIR::Linkage::Type::External:
+@@ -2568,7 +2875,9 @@ namespace {
                      m_of << "__attribute__((weak)) ";
                      break;
                  case Compiler::Msvc:
@@ -742,7 +755,7 @@ index 6d076cc5..5a70d61d 100644
                      break;
                  }
                  break;
-@@ -2579,7 +2882,8 @@ namespace {
+@@ -2579,7 +2888,8 @@ namespace {
                      m_of << "__attribute__((weak_import)) ";
                      break;
                  case Compiler::Msvc:
@@ -752,7 +765,7 @@ index 6d076cc5..5a70d61d 100644
                      break;
                  }
                  break;
-@@ -2592,12 +2896,15 @@ namespace {
+@@ -2592,12 +2902,15 @@ namespace {
                      m_of << "__attribute__((section(\"" << item.m_linkage.section << "\"))) ";
                      break;
                  case Compiler::Msvc:
@@ -769,7 +782,7 @@ index 6d076cc5..5a70d61d 100644
                  m_of << "static ";
              }
              emit_static_ty(type, p, /*is_proto=*/true);
-@@ -2617,14 +2924,21 @@ namespace {
+@@ -2617,14 +2930,21 @@ namespace {
  
              auto type = params.monomorph(m_resolve, item.m_type);
              // statics that are zero do not require initializers, since they will be initialized to zero on program startup.
@@ -793,7 +806,7 @@ index 6d076cc5..5a70d61d 100644
                  if( is_packed ) {
                      DEBUG("encoded.bytes = `" << FMT_CB(ss, for(auto& b: encoded.bytes) ss << std::setw(2) << std::setfill('0') << std::hex << unsigned(b) << (int(&b - encoded.bytes.data()) % 8 == 7 ? " " : "");) << "`");
                      DEBUG("encoded.relocations = " << encoded.relocations);
-@@ -2672,7 +2986,7 @@ namespace {
+@@ -2672,7 +2992,7 @@ namespace {
                              ++ reloc_it;
                          }
                          else {
@@ -802,7 +815,7 @@ index 6d076cc5..5a70d61d 100644
                          }
                      }
                  }
-@@ -2697,6 +3011,9 @@ namespace {
+@@ -2697,6 +3017,9 @@ namespace {
              //    emit_static_ty(type, p, /*is_proto=*/false);
              //    m_of << "\t// Zero init static " << p << " : " << type << " = " << encoded << "\n";
              //}
@@ -812,7 +825,7 @@ index 6d076cc5..5a70d61d 100644
  
              m_mir_res = nullptr;
          }
-@@ -2803,6 +3120,28 @@ namespace {
+@@ -2803,6 +3126,28 @@ namespace {
              TRACE_FUNCTION_F(p);
  
              m_of << "// EXTERN extern \"" << item.m_abi << "\" " << p << "\n";
@@ -841,7 +854,7 @@ index 6d076cc5..5a70d61d 100644
              // For MSVC, make a static wrapper that goes and calls the actual function
              if( item.m_linkage.name.rfind("llvm.", 0) == 0 )
              {
-@@ -2916,6 +3255,12 @@ namespace {
+@@ -2916,6 +3261,12 @@ namespace {
                  m_mir_res = nullptr;
                  return ;
              }
@@ -854,7 +867,7 @@ index 6d076cc5..5a70d61d 100644
              else if( item.m_linkage.name != "" && m_compiler == Compiler::Msvc )
              {
                  m_of << "#pragma comment(linker, \"/alternatename:" << Trans_Mangle(p) << "=" << item.m_linkage.name << "\")\n";
-@@ -2938,7 +3283,12 @@ namespace {
+@@ -2938,7 +3289,12 @@ namespace {
              {
                  m_of << "extern ";
              }
@@ -867,7 +880,7 @@ index 6d076cc5..5a70d61d 100644
              if( item.m_linkage.name != "" )
              {
                  switch(m_compiler)
-@@ -2967,7 +3317,7 @@ namespace {
+@@ -2967,7 +3323,7 @@ namespace {
              m_of << "// PROTO extern \"" << item.m_abi << "\" " << p << "\n";
              if( item.m_linkage.name != "" )
              {
@@ -876,7 +889,7 @@ index 6d076cc5..5a70d61d 100644
                  {
                      // If this function is implementing an external ABI, just rename it (don't bother with per-compiler trickery).
                      m_of << "#pragma comment(linker, \"/alternatename:" << item.m_linkage.name << "=" << Trans_Mangle(p) << "\")\n";
-@@ -3562,11 +3912,46 @@ namespace {
+@@ -3562,11 +3918,46 @@ namespace {
                  return false;
              }
          }
@@ -923,7 +936,7 @@ index 6d076cc5..5a70d61d 100644
              size_t  size, align;
              // NOTE: Uses the Size+Align version because that doesn't panic on unsized
              MIR_ASSERT(*m_mir_res, Target_GetSizeAndAlignOf(sp, m_resolve, ty, size, align), "Unexpected generic? " << ty);
-@@ -3907,8 +4292,9 @@ namespace {
+@@ -3907,8 +4298,9 @@ namespace {
                          emit_lvalue(e.dst); m_of << ".DATA[2] = "; emit_param(ve.val);
                      }
                      else {
@@ -935,7 +948,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      }
                  TU_ARMA(Borrow, ve) {
-@@ -3982,10 +4368,13 @@ namespace {
+@@ -3982,10 +4374,13 @@ namespace {
                          break;
                      }
                      else if( ve.op == ::MIR::eBinOp::MOD && (ty == ::HIR::CoreType::F32 || ty == ::HIR::CoreType::F64) ) {
@@ -951,7 +964,7 @@ index 6d076cc5..5a70d61d 100644
                          m_of << "("; emit_param(ve.val_l); m_of << ", "; emit_param(ve.val_r); m_of << ")";
                          break;
                      }
-@@ -4454,6 +4843,44 @@ namespace {
+@@ -4454,6 +4849,44 @@ namespace {
                  return ;
              }
  
@@ -996,7 +1009,7 @@ index 6d076cc5..5a70d61d 100644
              // Standard cast
              emit_lvalue(dst);
              m_of << " = ";
-@@ -4661,11 +5088,11 @@ namespace {
+@@ -4661,11 +5094,11 @@ namespace {
                      // Handle signed values
                      if( is_signed ) {
                          m_of << static_cast<int64_t>(e.values[odd_arm]);
@@ -1010,7 +1023,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      m_of << ") {"; cb(odd_arm); m_of << "} else {"; cb(odd_arm == 0 ? 1 : 0); m_of << "}\n";
                      return ;
-@@ -4681,10 +5108,10 @@ namespace {
+@@ -4681,10 +5114,10 @@ namespace {
                  {
                      // Handle signed values
                      if( is_signed ) {
@@ -1023,7 +1036,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      cb(j);
                      m_of << "break;\n";
-@@ -4751,7 +5178,7 @@ namespace {
+@@ -4751,7 +5184,7 @@ namespace {
                  m_of << ") {\n";
                  for(size_t i = 0; i < ve->size(); i++)
                  {
@@ -1032,7 +1045,7 @@ index 6d076cc5..5a70d61d 100644
                  }
                  m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
                  m_of << indent << "}\n";
-@@ -4769,7 +5196,7 @@ namespace {
+@@ -4769,7 +5202,7 @@ namespace {
                      if( (*ve)[i] == INT64_MIN )
                          m_of << "INT64_MIN";
                      else
@@ -1041,7 +1054,7 @@ index 6d076cc5..5a70d61d 100644
                      m_of << ": "; cb(i); m_of << " break;\n";
                  }
                  m_of << indent << "\tdefault: "; cb(SIZE_MAX); m_of << "\n";
-@@ -4839,6 +5266,7 @@ namespace {
+@@ -4839,6 +5272,7 @@ namespace {
                  }
              }
  
@@ -1049,7 +1062,7 @@ index 6d076cc5..5a70d61d 100644
              TU_MATCH_HDRA( (e.fcn), {)
              TU_ARMA(Value, e2) {
                  {
-@@ -4848,6 +5276,7 @@ namespace {
+@@ -4848,6 +5282,7 @@ namespace {
  
                      const auto& ret_ty = ty.data().as_Function().m_rettype;
                      omit_assign |= ret_ty.data().is_Diverge();
@@ -1057,7 +1070,7 @@ index 6d076cc5..5a70d61d 100644
                      if( !omit_assign )
                      {
                          emit_lvalue(e.ret_val); m_of << " = ";
-@@ -4912,6 +5341,8 @@ namespace {
+@@ -4912,6 +5347,8 @@ namespace {
                      }
                  }
                  m_of << Trans_Mangle(e2);
@@ -1066,7 +1079,7 @@ index 6d076cc5..5a70d61d 100644
                  }
              TU_ARMA(Intrinsic, e2) {
                  const auto& name = e2.name;
-@@ -4945,6 +5376,11 @@ namespace {
+@@ -4945,6 +5382,11 @@ namespace {
                      m_of << "zarg" << j;
                      continue;
                  }
@@ -1078,7 +1091,7 @@ index 6d076cc5..5a70d61d 100644
                  emit_param(e.args[j]);
              }
              m_of << " );\n";
-@@ -5957,6 +6393,9 @@ namespace {
+@@ -5957,6 +6399,9 @@ namespace {
                          ss << "\n\t\t";
                          // TODO: If the type has a high alignment, emit as a pointer? Might have FFI issues
                          auto ty = params.monomorph(m_resolve, item.m_args[i].second);
@@ -1088,7 +1101,7 @@ index 6d076cc5..5a70d61d 100644
                          this->emit_ctype( ty, FMT_CB(os, os << (this->type_is_high_align(ty) ? "*":"") << "arg" << i;) );
                          if( item.m_variadic || i+1 < item.m_args.size() )    m_of << ",";
                          m_of << " // " << ty;
-@@ -6118,6 +6557,14 @@ namespace {
+@@ -6118,6 +6563,14 @@ namespace {
                  if(ty.data().is_Pointer()) {
                      m_of << "("; emit_ctype(ty); m_of << ")";
                  }
@@ -1103,7 +1116,7 @@ index 6d076cc5..5a70d61d 100644
                  m_of << name;
                  switch( get_prim_size(params.m_types.at(0)) )
                  {
-@@ -6299,23 +6746,40 @@ namespace {
+@@ -6299,23 +6752,40 @@ namespace {
              else if( name == "min_align_of_val" || name == "align_of_val" ) {
                  emit_lvalue(e.ret_val); m_of << " = ";
                  const auto& ty = params.m_types.at(0);
@@ -1148,7 +1161,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      else {
                          m_of << "1";
-@@ -6323,7 +6787,7 @@ namespace {
+@@ -6323,7 +6793,7 @@ namespace {
                  }
                  else if( inner_ty.data().is_TraitObject() ) {
                      if( ! ty.data().is_TraitObject() ) {
@@ -1157,7 +1170,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      m_of << "((VTABLE_HDR*)"; emit_param(e.args.at(0)); m_of << ".META)->align";
                      if( ! ty.data().is_TraitObject() ) {
-@@ -6611,7 +7075,8 @@ namespace {
+@@ -6611,7 +7081,8 @@ namespace {
              else if( name == "caller_location" ) {
                  //m_of << "abort()";
                  auto p = m_crate.get_lang_item_path_opt("panic_location");
@@ -1167,7 +1180,7 @@ index 6d076cc5..5a70d61d 100644
                  if( p == HIR::SimplePath() ) {
                      m_of << "s_ZRG2cE9core0_0_05panic8Location0g";
                  }
-@@ -6620,7 +7085,7 @@ namespace {
+@@ -6620,7 +7091,7 @@ namespace {
                  }
                  m_of << " mrustc_empty_caller_location = {0,0,{\"\",0}};";
                  //m_of << " mrustc_empty_caller_location = {{\"\",0},0,0};";  // NOTE: Depends on the generated layout :(
@@ -1176,7 +1189,7 @@ index 6d076cc5..5a70d61d 100644
              }
              // --- Pointer manipulation
              else if( name == "offset" ) {   // addition, with the reqirement that the resultant pointer be in bounds
-@@ -6938,12 +7403,12 @@ namespace {
+@@ -6938,12 +7409,12 @@ namespace {
                          m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
                          break;
                      case ::HIR::CoreType::I64:
@@ -1191,7 +1204,7 @@ index 6d076cc5..5a70d61d 100644
                          }
                          else
                          {
-@@ -7023,12 +7488,12 @@ namespace {
+@@ -7023,12 +7494,12 @@ namespace {
                          m_of << "("; emit_param(e.args.at(0)); m_of << " < 0 ? -0x8000000l : 0x7FFFFFFFl)";
                          break;
                      case ::HIR::CoreType::I64:
@@ -1206,7 +1219,7 @@ index 6d076cc5..5a70d61d 100644
                          }
                          else
                          {
-@@ -7372,12 +7837,15 @@ namespace {
+@@ -7372,12 +7843,15 @@ namespace {
                      m_of << "abort();";
                      return ;
                  }
@@ -1223,7 +1236,7 @@ index 6d076cc5..5a70d61d 100644
                  };
                  // > Round to nearest integer, half-way rounds away from zero
                  if( name == "rintf32" || name == "rintf64" ) {
-@@ -7392,17 +7860,17 @@ namespace {
+@@ -7392,17 +7866,17 @@ namespace {
                      emit1("fabs");
                  }
                  else if( name == "copysignf32" || name == "copysignf64" ) {
@@ -1244,7 +1257,7 @@ index 6d076cc5..5a70d61d 100644
                  }
                  else if( name == "expf32" || name == "expf64" ) {
                      emit1("exp");
-@@ -7438,7 +7906,7 @@ namespace {
+@@ -7438,7 +7912,7 @@ namespace {
                      emit1("sin");
                  }
                  else if( name == "fmaf32" || name == "fmaf64" ) {
@@ -1253,7 +1266,7 @@ index 6d076cc5..5a70d61d 100644
                  }
                  else if( name == "maxnumf32" || name == "maxnumf64" ) {
                      emit_lvalue(e.ret_val); m_of << " = ("; emit_param(e.args.at(0)); m_of << " > "; emit_param(e.args.at(1)); m_of << ") ? "; emit_param(e.args.at(0)); m_of << " : "; emit_param(e.args.at(1));
-@@ -7902,7 +8370,7 @@ namespace {
+@@ -7902,7 +8376,7 @@ namespace {
  
                  else {
                      // TODO: Platform intrinsics
@@ -1262,7 +1275,7 @@ index 6d076cc5..5a70d61d 100644
                  }
              }
              else {
-@@ -8006,9 +8474,10 @@ namespace {
+@@ -8006,9 +8480,10 @@ namespace {
                  // Emit destructors for all entries
                  if( te.size.as_Known() > 0 )
                  {
@@ -1275,7 +1288,7 @@ index 6d076cc5..5a70d61d 100644
                  }
                  }
              TU_ARMA(Tuple, te) {
-@@ -8046,9 +8515,9 @@ namespace {
+@@ -8046,9 +8521,9 @@ namespace {
                  while(lvr.is_Field())   lvr.try_unwrap();
                  MIR_ASSERT(*m_mir_res, lvr.is_Deref(), "Access to unized type without a deref - " << lvr << " (part of " << slot << ")");
                  // Call destructor on all entries
@@ -1287,7 +1300,7 @@ index 6d076cc5..5a70d61d 100644
                  }
              }
          }
-@@ -8064,7 +8533,7 @@ namespace {
+@@ -8064,7 +8539,7 @@ namespace {
              case ::HIR::CoreType::I32:
              case ::HIR::CoreType::I64:
              case ::HIR::CoreType::Isize:
@@ -1296,7 +1309,7 @@ index 6d076cc5..5a70d61d 100644
                  break;
              case ::HIR::CoreType::Bool:
              case ::HIR::CoreType::U8:
-@@ -8073,7 +8542,7 @@ namespace {
+@@ -8073,7 +8548,7 @@ namespace {
              case ::HIR::CoreType::U64:
              case ::HIR::CoreType::Usize:
              case ::HIR::CoreType::Char:
@@ -1305,7 +1318,7 @@ index 6d076cc5..5a70d61d 100644
                  break;
              case ::HIR::CoreType::I128: // TODO: Emulation
              case ::HIR::CoreType::U128: // TODO: Emulation
-@@ -8253,19 +8722,19 @@ namespace {
+@@ -8253,19 +8728,19 @@ namespace {
                      }
                      else {
                          m_of << c.v.truncate_i64();
@@ -1328,7 +1341,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      else
                      {
-@@ -8291,17 +8760,17 @@ namespace {
+@@ -8291,17 +8766,17 @@ namespace {
                      break;
                  case ::HIR::CoreType::U64:
                  case ::HIR::CoreType::Usize:
@@ -1349,7 +1362,7 @@ index 6d076cc5..5a70d61d 100644
                      }
                      else
                      {
-@@ -8468,6 +8937,11 @@ namespace {
+@@ -8468,6 +8943,11 @@ namespace {
                      m_of << "tUNIT";
                  else {
                      m_of << "TUP_" << te.size();

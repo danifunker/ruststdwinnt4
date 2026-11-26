@@ -24,9 +24,9 @@ mod imp;
 
 mod sys;
 
-// Not under mrustc (Alpha, MIPS, PowerPC): Microsoft's C run-time is linked there, and its
-// start-up code (which calls the C main mrustc writes) and TLS directory take this one's place.
-#[cfg(not(rust_compiler = "mrustc"))]
+// Under mrustc (Alpha, MIPS, PowerPC) Microsoft's C run-time is linked, and its start-up code
+// (which calls the C main mrustc writes) takes the place of crt's; crt's TLS directory stays,
+// as Visual C++ 4.1's lists no TLS callbacks.
 pub mod crt;
 pub mod file;
 #[cfg(all(rust_compiler = "mrustc", target_arch = "alpha"))]
