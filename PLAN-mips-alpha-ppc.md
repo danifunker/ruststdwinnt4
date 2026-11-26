@@ -345,11 +345,35 @@ carries for that), then with the real compiler in CI.
   tell), and the "HashMap, random keys" check stops the program at `NtQuerySystemInformation`
   (nt4compat's random seed). The job passes on stdsmoke and reports stdtest.
 
-### Next
+### On a real Alpha (2026-11-26)
 
-- stdtest on a real NT 4.0 for Alpha: the ES40 emulator and the NT 4.0 image on the NAS
-  (nothing set up yet), or `ntrun` grown by the functions above (tenox7's project).
-- Push mrustc's `alpha-nt4` branch to the fork (CI then uses it instead of the patch).
+A DEC AlphaStation 200 (MiSTer FPGA, 21064, 128 MB), Windows NT 4.0 TSE SP5, driven over RDP
+with vintrdp's control socket. With the CI run of 4dc0a64: **hello, stdsmoke and stdtest all
+pass** (stdtest's twelve checks, processes and TCP included), on the console and redirected.
+What `ntrun` hadn't shown, and the fixes:
+
+- **Threads faulted on their first instruction.** Visual C++ for Alpha passes a struct
+  argument in a 64-bit register without sign-extending it; std's `Option<start routine>` is
+  a 4-byte struct in mrustc's C, so kernel32's `CreateThread` got junk in the register's
+  upper half (fir `0000000d_00630850`). mrustc's C89 mode now passes 4-byte aggregates to C
+  functions (and through C-ABI function pointers) as 32-bit integers. `ntrun` used only the
+  low half.
+- **Console output panicked** (then recursed until the stack ran out, exit 128): NT 4.0
+  takes no flags with `CP_UTF8` (`MB_ERR_INVALID_CHARS` is XP's) and std asserts on the
+  failure. Fixed in `std/1.90.0/nt4.patch` for every NT 4.0 target: x86 and ARM have the same
+  path; their tests had redirected output only.
+- **Thread-local destructors never ran**: Visual C++ 4.1's `tlssup` points the TLS
+  directory's callbacks at the NULL marker, so the loader called none. nt4compat keeps its own
+  TLS directory under mrustc (and mrustc defines `#[export_name]` statics under their names).
+- Tools for the next one: nt4compat's unhandled-exception filter (mrustc, Alpha) prints the
+  exception, fir/ra/sp, `VirtualQuery` of the faulting page and code addresses up the stack;
+  the CI keeps link maps, and `stdsmoke`/`stdtest-alpha-nt4.exe` (without the ntrun shims) for
+  real machines. The C probes in `tools/ntsdk-spike/probes/thread*.c` showed what *wasn't* the
+  cause (stack sizes, flags, fresh code pages, TLS, memory, DLLs, atomics).
+
+
+- Point CI at the fork's `alpha-nt4` branch (pushed) instead of `mrustc.patch`.
+- Check the console fix on x86 and ARM NT 4.0 (built with rustc).
 - A driver for vintrdp's crates (minicargo with the target and `wrap/mrustc`, as
   `translate-std.sh` does for std), optimization (`cl` runs without `-Ox` so far; core
   takes 160 to 280 s as it is), and no LIBC.LIB if its start-up code shouldn't ship.
