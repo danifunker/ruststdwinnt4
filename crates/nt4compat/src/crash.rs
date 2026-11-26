@@ -14,7 +14,7 @@ extern "system" {
 }
 
 struct Out {
-    buf: [u8; 1024],
+    buf: [u8; 2048],
     len: usize,
 }
 
@@ -49,7 +49,7 @@ pub unsafe fn report(pointers: *mut c_void) {
         let p = pointers as *const *const u8;
         let rec = *p;
         let ctx = *p.add(1);
-        let mut o = Out { buf: [0; 1024], len: 0 };
+        let mut o = Out { buf: [0; 2048], len: 0 };
         o.s("\r\n*** exception ");
         o.hex(*(rec as *const u32) as u64, 8);
         o.s(" at ");
@@ -109,6 +109,27 @@ pub unsafe fn report(pointers: *mut c_void) {
                 o.s(" ");
                 o.hex(*sp.add(i) as u64, 8);
             }
+        }
+        // A rough backtrace: the words up the stack that point into the image's code, up to
+        // 60 of them in up to 256 KB (the map names their functions)
+        o.s("\r\n    code addresses up the stack:");
+        let mut found = 0;
+        let mut i = 0usize;
+        while !sp.is_null() && found < 60 && i < 65536 {
+            let a = sp.add(i);
+            if IsBadReadPtr(a as *const c_void, 4) != 0 {
+                break;
+            }
+            let v = *a;
+            if (0x0040_1000..0x0080_0000).contains(&v) && v & 3 == 0 {
+                if found % 8 == 0 {
+                    o.s("\r\n     ");
+                }
+                o.s(" ");
+                o.hex(v as u64, 8);
+                found += 1;
+            }
+            i += 1;
         }
         o.s("\r\n");
         let mut w = 0u32;
