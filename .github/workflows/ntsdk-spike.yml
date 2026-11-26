@@ -45,7 +45,7 @@ jobs:
         if: always()
         run: |
           docker run --rm -v "$PWD":/src tenox7/ntsdk sh -c '
-            cd tools/ntsdk-spike/probes && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread-alpha.exe thread.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread2-alpha.exe thread2.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread3-alpha.exe thread3.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread5-alpha.exe thread5.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread6-alpha.exe thread6.c && cp ../../../imports/arm/userenv.def . && ntsdk nt40 alpha lib -nologo -machine:alpha -def:userenv.def -out:userenv-alpha.lib && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread7-alpha.exe thread7.c ws2_32.lib advapi32.lib userenv-alpha.lib && ntsdk nt40 alpha ntrun thread-alpha.exe && ntsdk nt40 alpha ntrun thread2-alpha.exe'
+            cd tools/ntsdk-spike/probes && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread-alpha.exe thread.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread2-alpha.exe thread2.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread3-alpha.exe thread3.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread5-alpha.exe thread5.c && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread6-alpha.exe thread6.c && cp ../../../imports/arm/userenv.def . && ntsdk nt40 alpha lib -nologo -machine:alpha -def:userenv.def -out:userenv-alpha.lib && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread7-alpha.exe thread7.c ws2_32.lib advapi32.lib userenv-alpha.lib && ntsdk nt40 alpha cl -nologo -QAieee1 -Fethread8-alpha.exe thread8.c && ntsdk nt40 alpha ntrun thread-alpha.exe && ntsdk nt40 alpha ntrun thread2-alpha.exe'
       - name: Probes
         if: always()
         run: docker run --rm -v "$PWD":/src tenox7/ntsdk tools/ntsdk-spike/probe.sh
