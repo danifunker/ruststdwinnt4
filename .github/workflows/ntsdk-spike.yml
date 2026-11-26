@@ -215,3 +215,4 @@ jobs:
             out-std/*.log
             out-std/*.exe
             out-std/*.map
+            out-std/*-alpha.obj
