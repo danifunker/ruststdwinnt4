@@ -63,10 +63,13 @@ pub unsafe fn report(pointers: *mut c_void) {
             o.hex(*(rec.add(20 + 4 * i as usize) as *const u32) as u64, 8);
         }
         let int = |i: usize| *(ctx.add(256 + 8 * i) as *const u64);
+        // (fir, ra, t12 in full: a 32-bit address in an Alpha register must be sign-extended)
         o.s("\r\n    fir ");
-        o.hex(*(ctx.add(528) as *const u64), 8);
+        o.hex(*(ctx.add(528) as *const u64), 16);
         o.s(" ra ");
-        o.hex(int(26), 8);
+        o.hex(int(26), 16);
+        o.s(" t12 ");
+        o.hex(int(27), 16);
         o.s(" sp ");
         o.hex(int(30), 8);
         o.s(" a0 ");
